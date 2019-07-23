@@ -13,10 +13,10 @@ extern crate tower_util;
 #[macro_use]
 extern crate failure;
 
-use futures::Future;
-use hyper::client::connect::{Destination, HttpConnector};
 use beancounter_grpc::proto;
 use beancounter_grpc::tower_grpc::Request;
+use futures::Future;
+use hyper::client::connect::{Destination, HttpConnector};
 use std::env;
 use tower_hyper::{client, util};
 use tower_util::MakeService;
@@ -72,8 +72,8 @@ pub fn main() -> Result<(), Error> {
 
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
-         error!("Usage: {} <addr>", args[0]);
-                 return Err(Error::BadArgs);
+        error!("Usage: {} <addr>", args[0]);
+        return Err(Error::BadArgs);
     }
 
     let address = &args[1];
