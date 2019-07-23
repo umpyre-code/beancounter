@@ -1,0 +1,6 @@
+CREATE TABLE transactions (
+  id BIGSERIAL PRIMARY KEY,
+  client_id UUID,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  action TRANSACTION_TYPE NOT NULL,
+  amount MONEY NOT NULL)

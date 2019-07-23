@@ -1,0 +1,25 @@
+[service]
+worker_threads = 10
+ca_cert_path = "test/UmpyreAuth.crt"
+tls_cert_path = "test/BeanCounter.crt"
+tls_key_path = "test/BeanCounter.key"
+bind_to_address = "127.0.0.1:10011"
+
+[database.writer]
+host = "127.0.0.1"
+port = 5432
+username = "postgres"
+password = "password"
+name = "umpyre"
+connection_pool_size = 10
+
+[database.reader]
+host = "127.0.0.1"
+port = 5432
+username = "postgres"
+password = "password"
+name = "umpyre"
+connection_pool_size = 10
+
+[metrics]
+bind_to_address = "127.0.0.1:5001"

@@ -1,5 +1,5 @@
 [package]
-name = "beancounter-lib"
+name = "beancounter-grpc"
 version = "0.1.0"
 authors = ["Brenden Matthews <brenden@brndn.io>"]
 edition = "2018"

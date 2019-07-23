@@ -4,8 +4,62 @@ package beancounter;
 option java_package = "beancounter";
 
 service BeanCounter {
+  // Get account balances
+  rpc GetBalances(GetBalancesRequest) returns (GetBalancesResponse);
+
+  // Get transactions
+  rpc GetTransactions(GetTransactionsRequest) returns (GetTransactionsResponse);
+
+  // Add credits
+  rpc AddCredits(AddCreditsRequest) returns (AddCreditsResponse);
+
+  // Withdraw credits
+  rpc WithdrawCredits(WithdrawCreditsRequest) returns (WithdrawCreditsResponse);
+
   // Health check endpoint
   rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message Timestamp {
+  // Represents seconds of UTC time since Unix epoch
+  // 1970-01-01T00:00:00Z. Must be from 0001-01-01T00:00:00Z to
+  // 9999-12-31T23:59:59Z inclusive.
+  int64 seconds = 1;
+
+  // Non-negative fractions of a second at nanosecond resolution. Negative
+  // second values with fractions must still have non-negative nanos values
+  // that count forward in time. Must be from 0 to 999,999,999
+  // inclusive.
+  int32 nanos = 2;
+}
+
+message AddCreditsRequest { string client_id = 1; }
+message AddCreditsResponse { string client_id = 1; }
+
+message WithdrawCreditsRequest { string client_id = 1; }
+message WithdrawCreditsResponse { string client_id = 1; }
+
+message GetBalancesRequest { string client_id = 1; }
+message GetBalancesResponse {
+  string client_id = 1;
+  int64 balance = 2;
+}
+
+message Transaction {
+  enum Type {
+    DEBIT = 0;
+    CREDIT = 1;
+  }
+  Timestamp created_at = 1;
+  Type type = 2;
+  string client_id = 3;
+  int64 amount_cents = 4;
+}
+
+message GetTransactionsRequest { string client_id = 1; }
+message GetTransactionsResponse {
+  string client_id = 1;
+  repeated Transaction transactions = 2;
 }
 
 message HealthCheckRequest { string service = 1; }
