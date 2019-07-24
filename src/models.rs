@@ -44,6 +44,12 @@ pub struct NewBalance {
     pub promo_cents: i64,
 }
 
+#[derive(Insertable)]
+#[table_name = "balances"]
+pub struct NewZeroBalance {
+    pub client_id: Uuid,
+}
+
 #[derive(AsChangeset)]
 #[table_name = "balances"]
 pub struct UpdatedBalance {

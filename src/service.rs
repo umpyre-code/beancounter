@@ -59,6 +59,24 @@ impl From<uuid::parser::ParseError> for RequestError {
     }
 }
 
+fn calculate_balances(credit_sum: i64, promo_credit_sum: i64, debit_sum: i64) -> (i64, i64) {
+    // Add debits to promo balance first
+    let mut promo_cents_remaining = promo_credit_sum + debit_sum;
+    let debit_remaining = promo_cents_remaining;
+    if promo_cents_remaining < 0 {
+        promo_cents_remaining = 0;
+    }
+
+    // If there's anything left to be debited, add that to the final balance
+    let balance_cents_remaining = if debit_remaining < 0 {
+        credit_sum + debit_remaining
+    } else {
+        credit_sum
+    };
+
+    (balance_cents_remaining, promo_cents_remaining)
+}
+
 #[instrument(INFO)]
 fn update_and_return_balance(
     client_uuid: uuid::Uuid,
@@ -94,22 +112,19 @@ fn update_and_return_balance(
         .first::<Option<i64>>(conn)?
         .unwrap_or_else(|| 0);
 
-    let total_credit = credit_sum + promo_credit_sum;
-    // Subtract from promo first
-
-    // Then subtract from remaining balance
-    let balance = (credit_sum + promo_credit_sum) - debit_sum;
+    let (balance_cents_remaining, promo_cents_remaining) =
+        calculate_balances(credit_sum, promo_credit_sum, debit_sum);
 
     Ok(insert_into(balances)
         .values(&NewBalance {
             client_id: client_uuid,
-            balance_cents: balance,
-            promo_cents: 0,
+            balance_cents: balance_cents_remaining,
+            promo_cents: promo_cents_remaining,
         })
         .on_conflict(schema::balances::columns::client_id)
         .do_update()
         .set(&UpdatedBalance {
-            balance_cents: balance,
+            balance_cents: balance_cents_remaining,
             promo_cents: 0,
         })
         .get_result(conn)?)
@@ -131,7 +146,40 @@ impl BeanCounter {
         &self,
         request: &GetBalancesRequest,
     ) -> Result<GetBalancesResponse, RequestError> {
-        Err(RequestError::BadArguments)
+        use crate::models::*;
+        use crate::sql_types::*;
+        use diesel::dsl::*;
+        use diesel::insert_into;
+        use diesel::prelude::*;
+        use diesel::result::Error;
+        use schema::balances::columns::*;
+        use schema::balances::table as balances;
+        use uuid::Uuid;
+
+        let client_uuid = Uuid::parse_str(&request.client_id)?;
+
+        let conn = self.db_reader.get().unwrap();
+        let balance = conn.transaction::<Balance, Error, _>(|| {
+            let result = balances.filter(client_id.eq(client_uuid)).first(&conn);
+
+            match result {
+                // If the balance record exists, return that
+                Ok(result) => Ok(result),
+                // If there's no record yet, create a new zeroed out balance record.
+                Err(diesel::NotFound) => Ok(insert_into(balances)
+                    .values(&NewZeroBalance {
+                        client_id: client_uuid,
+                    })
+                    .get_result(&conn)?),
+                Err(err) => Err(err),
+            }
+        })?;
+
+        Ok(GetBalancesResponse {
+            client_id: balance.client_id.to_simple().to_string(),
+            balance_cents: balance.balance_cents,
+            promo_cents: balance.promo_cents,
+        })
     }
 
     #[instrument(INFO)]
@@ -387,7 +435,46 @@ mod tests {
 
             assert!(balance_result.is_ok());
             let balance_result = balance_result.unwrap();
-            assert_eq!(balance_result.amount_cents, 100);
+            assert_eq!(balance_result.balance_cents, 100);
+            assert_eq!(balance_result.promo_cents, 0);
         }
+    }
+
+    #[test]
+    fn test_calculate_balances() {
+        let (balance, promo) = calculate_balances(0, 0, 0);
+        assert_eq!(balance, 0);
+        assert_eq!(promo, 0);
+
+        let (balance, promo) = calculate_balances(10, 0, 0);
+        assert_eq!(balance, 10);
+        assert_eq!(promo, 0);
+
+        let (balance, promo) = calculate_balances(10, 0, -10);
+        println!("{} {}", balance, promo);
+        assert_eq!(balance, 0);
+        assert_eq!(promo, 0);
+
+        let (balance, promo) = calculate_balances(10, 10, -10);
+        assert_eq!(balance, 10);
+        assert_eq!(promo, 0);
+
+        let (balance, promo) = calculate_balances(10, 10, -20);
+        assert_eq!(balance, 0);
+        assert_eq!(promo, 0);
+
+        let (balance, promo) = calculate_balances(0, 10, -10);
+        assert_eq!(balance, 0);
+        assert_eq!(promo, 0);
+
+        // These cases (negative balances) should never occur, but test for it
+        // here anyway.
+        let (balance, promo) = calculate_balances(0, 10, -20);
+        assert_eq!(balance, -10);
+        assert_eq!(promo, 0);
+
+        let (balance, promo) = calculate_balances(10, 0, -20);
+        assert_eq!(balance, -10);
+        assert_eq!(promo, 0);
     }
 }

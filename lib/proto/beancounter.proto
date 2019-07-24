@@ -76,7 +76,8 @@ message SettlePaymentResponse {
 message GetBalancesRequest { string client_id = 1; }
 message GetBalancesResponse {
   string client_id = 1;
-  int64 amount_cents = 2;
+  int64 balance_cents = 2;
+  int64 promo_cents = 3;
 }
 
 message Transaction {
