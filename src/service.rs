@@ -17,6 +17,15 @@ fn make_intcounter(name: &str, description: &str) -> prometheus::IntCounter {
     counter
 }
 
+// This amount is calculated by subtracting Stripe's maximum fee of 3.9% + 30C
+// from their charge maximum, which is $999,999.99 according to
+// https://stripe.com/docs/currencies#minimum-and-maximum-charge-amounts.
+// The base 2.9% + 30C fee also includes an optional fee of 1% for foreign cards.
+// Thus, it's calculated like so (w/ Python):
+//   >>> (99999999 - 30) / 1.039
+//   96246360.92396536
+static MAX_PAYMENT_AMOUNT: i32 = 96246360;
+
 lazy_static! {
     static ref GET_BALANCE: prometheus::IntCounter =
         make_intcounter("get_balance", "get_balance called");
@@ -60,14 +69,18 @@ impl From<uuid::parser::ParseError> for RequestError {
 }
 
 fn calculate_balances(credit_sum: i64, promo_credit_sum: i64, debit_sum: i64) -> (i64, i64) {
+    // Debits are negative, and credits are positive. Thus, adding a debit to a
+    // credit is equivalent to subtraction.
+
     // Add debits to promo balance first
     let mut promo_cents_remaining = promo_credit_sum + debit_sum;
     let debit_remaining = promo_cents_remaining;
     if promo_cents_remaining < 0 {
+        // The promo balance should never be negative
         promo_cents_remaining = 0;
     }
 
-    // If there's anything left to be debited, add that to the final balance
+    // Add any remaining debits to the final balance
     let balance_cents_remaining = if debit_remaining < 0 {
         credit_sum + debit_remaining
     } else {
@@ -422,6 +435,8 @@ mod tests {
         let tx_count = transactions.select(count(id)).first(&conn);
         assert_eq!(Ok(200), tx_count);
 
+        // All credits are positive, and all debits are negative. When summed,
+        // they should always balance out to 0.
         let tx_sum = transactions
             .select(sum(amount_cents))
             .first::<Option<i64>>(&conn)
@@ -467,8 +482,8 @@ mod tests {
         assert_eq!(balance, 0);
         assert_eq!(promo, 0);
 
-        // These cases (negative balances) should never occur, but test for it
-        // here anyway.
+        // These cases (negative balances) should never occur, but we test for
+        // it here anyway, just to make sure the math is right.
         let (balance, promo) = calculate_balances(0, 10, -20);
         assert_eq!(balance, -10);
         assert_eq!(promo, 0);
