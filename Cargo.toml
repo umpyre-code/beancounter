@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 chrono = { version = "0.4"  }
-diesel = { version = "1.4", features = ["postgres", "chrono", "r2d2", "uuidv07"] }
+diesel = { version = "1.4", features = ["postgres", "chrono", "numeric", "r2d2", "uuidv07"] }
 diesel-derive-enum = { version = "0.4", features = ["postgres"] }
 env_logger = { version = "0.6", default-features = false }
 failure = "0.1"
@@ -28,5 +28,6 @@ tower-request-modifier = "0.1"
 tower-service = "0.2"
 tower-util = "0.1"
 url = "1"
-uuid = "0.7"
+uuid = { version = "0.7", features = ["serde", "v4"] }
 yansi = "0.5"
+bigdecimal = "0.1"

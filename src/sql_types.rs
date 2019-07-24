@@ -6,4 +6,6 @@ pub enum TransactionType {
     Debit,
     #[db_rename = "credit"]
     Credit,
+    #[db_rename = "promo_credit"]
+    PromoCredit,
 }

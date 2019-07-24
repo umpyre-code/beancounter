@@ -24,6 +24,7 @@ extern crate url;
 extern crate yansi;
 
 mod config;
+mod models;
 mod schema;
 mod service;
 mod sql_types;

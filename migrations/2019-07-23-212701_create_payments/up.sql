@@ -1,8 +1,8 @@
-CREATE TABLE transactions (
+CREATE TABLE payments (
   id BIGSERIAL PRIMARY KEY,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  client_id UUID,
-  tx_type TRANSACTION_TYPE NOT NULL,
+  client_id_from UUID,
+  client_id_to UUID,
   amount_cents INTEGER NOT NULL,
-  settled BOOLEAN NOT NULL DEFAULT FALSE)
+  message TEXT NOT NULL UNIQUE)

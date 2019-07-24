@@ -1,2 +1,3 @@
 CREATE TYPE transaction_type AS ENUM ( 'debit',
-  'credit')
+  'credit',
+  'promo_credit')
