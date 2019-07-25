@@ -10,11 +10,9 @@ use crate::sql_types::*;
 pub struct Transaction {
     pub id: i64,
     pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
     pub client_id: Option<Uuid>,
     pub tx_type: TransactionType,
     pub amount_cents: i32,
-    pub settled: bool,
 }
 
 #[derive(Insertable)]
@@ -23,7 +21,6 @@ pub struct NewTransaction {
     pub client_id: Option<Uuid>,
     pub tx_type: TransactionType,
     pub amount_cents: i32,
-    pub settled: bool,
 }
 
 #[derive(Queryable, Identifiable, Debug)]

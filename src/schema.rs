@@ -34,11 +34,9 @@ table! {
     transactions (id) {
         id -> Int8,
         created_at -> Timestamp,
-        updated_at -> Timestamp,
         client_id -> Nullable<Uuid>,
         tx_type -> Transaction_type,
         amount_cents -> Int4,
-        settled -> Bool,
     }
 }
 

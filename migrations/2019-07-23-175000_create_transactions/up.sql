@@ -1,8 +1,6 @@
 CREATE TABLE transactions (
   id BIGSERIAL PRIMARY KEY,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
   client_id UUID,
   tx_type TRANSACTION_TYPE NOT NULL,
-  amount_cents INTEGER NOT NULL,
-  settled BOOLEAN NOT NULL DEFAULT FALSE)
+  amount_cents INTEGER NOT NULL)

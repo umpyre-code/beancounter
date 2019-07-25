@@ -78,7 +78,6 @@ impl From<&models::Transaction> for Transaction {
                 TransactionType::PromoCredit => transaction::Type::PromoCredit,
                 TransactionType::Debit => transaction::Type::Debit,
             } as i32,
-            settled: tx.settled,
         }
     }
 }
@@ -182,7 +181,6 @@ fn add_transaction(
     client_id_credit: Option<uuid::Uuid>,
     client_id_debit: Option<uuid::Uuid>,
     amount_cents: i32,
-    settled: bool,
     conn: &diesel::r2d2::PooledConnection<diesel::r2d2::ConnectionManager<diesel::PgConnection>>,
 ) -> Result<(), diesel::result::Error> {
     use crate::models::*;
@@ -194,13 +192,11 @@ fn add_transaction(
         client_id: client_id_credit,
         tx_type: TransactionType::Credit,
         amount_cents,
-        settled,
     };
     let tx_debit = NewTransaction {
         client_id: client_id_debit,
         tx_type: TransactionType::Debit,
         amount_cents: -amount_cents, // Debits should be negative
-        settled,
     };
 
     diesel::insert_into(transactions)
@@ -319,7 +315,7 @@ impl BeanCounter {
 
         let conn = self.db_writer.get().unwrap();
         let balance = conn.transaction::<Balance, Error, _>(|| {
-            add_transaction(Some(client_uuid), None, request.amount_cents, true, &conn)?;
+            add_transaction(Some(client_uuid), None, request.amount_cents, &conn)?;
 
             Ok(update_and_return_balance(client_uuid, &conn)?)
         })?;
@@ -381,18 +377,21 @@ impl BeanCounter {
         }
 
         let balance = conn.transaction::<Balance, Error, _>(|| {
-            // Credit the recipient account, debit the sender. This TX is
-            // refundable, thus we mark it as not being settled.
-            add_transaction(
-                Some(client_uuid_to),
-                Some(client_uuid_from),
-                payment_cents,
-                false,
-                &conn,
-            )?;
+            // Zero value payments are perfectly valid; they simply don't generate
+            // a TX
+            if total_amount > 0 {
+                // Credit the recipient account, debit the sender. This TX is
+                // refundable.
+                add_transaction(
+                    Some(client_uuid_to),
+                    Some(client_uuid_from),
+                    payment_cents,
+                    &conn,
+                )?;
 
-            // Credit the cash account, debit the sender. This TX is non-refundable.
-            add_transaction(None, Some(client_uuid_from), fee_cents, true, &conn)?;
+                // Credit the cash account, debit the sender. This TX is non-refundable.
+                add_transaction(None, Some(client_uuid_from), fee_cents, &conn)?;
+            }
 
             // Finally, create a payment record.
             let payment = NewPayment {
@@ -846,9 +845,25 @@ mod tests {
             assert!(result.is_ok());
             let result = result.unwrap();
             assert_eq!(result.result, add_payment_response::Result::Success as i32);
-            println!("{} {}", payment_amount, payment_cents);
             assert_eq!(result.payment_cents, payment_cents);
             assert_eq!(result.fee_cents, fee_cents);
+
+            let conn = db_pool.get().unwrap();
+
+            // Check balance of sender
+            let sender_balance =
+                get_balance(Uuid::parse_str(&client_uuid_from).unwrap(), &conn).unwrap();
+            assert_eq!(
+                sender_balance.balance_cents,
+                (payment_amount - (payment_cents + fee_cents)).into()
+            );
+            assert_eq!(sender_balance.promo_cents, 0);
+
+            // Check balance of recipient--should be zero
+            let recipient_balance =
+                get_balance(Uuid::parse_str(&client_uuid_to).unwrap(), &conn).unwrap();
+            assert_eq!(recipient_balance.balance_cents, 0);
+            assert_eq!(recipient_balance.promo_cents, 0);
         }
 
         check_zero_sum(&db_pool);

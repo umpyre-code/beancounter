@@ -90,7 +90,6 @@ message Transaction {
   Type tx_type = 2;
   string client_id = 3;
   int32 amount_cents = 4;
-  bool settled = 5;
 }
 
 message Balance {
