@@ -56,6 +56,7 @@ dependencies = [
  "beancounter-grpc 0.1.0",
  "bigdecimal 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "data-encoding 2.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "diesel 1.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "diesel-derive-enum 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -86,6 +87,7 @@ name = "beancounter-grpc"
 version = "0.1.0"
 dependencies = [
  "bytes 0.4.12 (registry+https://github.com/rust-lang/crates.io-index)",
+ "chrono 0.4.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "prost 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower-grpc 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower-grpc-build 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -253,6 +255,11 @@ dependencies = [
  "quote 0.6.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "syn 0.15.40 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "data-encoding"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "diesel"
@@ -1711,6 +1718,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum darling 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fcfbcb0c5961907597a7d1148e3af036268f2b773886b8bb3eeb1e1281d3d3d6"
 "checksum darling_core 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "6afc018370c3bff3eb51f89256a6bdb18b4fdcda72d577982a14954a7a0b402c"
 "checksum darling_macro 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c6d8dac1c6f1d29a41c4712b4400f878cb4fcc4c7628f298dd75038e024998d1"
+"checksum data-encoding 2.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "f4f47ca1860a761136924ddd2422ba77b2ea54fe8cc75b9040804a0d9d32ad97"
 "checksum diesel 1.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "8d24935ba50c4a8dc375a0fd1f8a2ba6bdbdc4125713126a74b965d6a01a06d7"
 "checksum diesel-derive-enum 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)" = "adbaf5e1344edeedc4d1cead2dc3ce6fc4115bb26b3704c533b92717940f2fb5"
 "checksum diesel_derives 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "62a27666098617d52c487a41f70de23d44a1dc1f3aa5877ceba2790fb1f1cab4"

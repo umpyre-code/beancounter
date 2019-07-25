@@ -5,7 +5,10 @@ authors = ["Brenden Matthews <brenden@brndn.io>"]
 edition = "2018"
 
 [dependencies]
+beancounter-grpc = { path = "lib"}
+bigdecimal = "0.1"
 chrono = { version = "0.4"  }
+data-encoding = "2.1"
 diesel = { version = "1.4", features = ["postgres", "chrono", "numeric", "r2d2", "uuidv07"] }
 diesel-derive-enum = { version = "0.4", features = ["postgres"] }
 env_logger = { version = "0.6", default-features = false }
@@ -16,9 +19,7 @@ hyper = "0.12"
 instrumented = { git = "ssh://git@github.com/umpyre-code/instrumented.git" }
 lazy_static = "1.3"
 log = "0.4"
-rand = "0.7"
 regex = "1"
-beancounter-grpc = { path = "lib"}
 serde = "1.0"
 serde_derive = "1.0"
 tokio = "0.1"
@@ -30,4 +31,6 @@ tower-util = "0.1"
 url = "1"
 uuid = { version = "0.7", features = ["serde", "v4"] }
 yansi = "0.5"
-bigdecimal = "0.1"
+
+[dev-dependencies]
+rand = "0.7"

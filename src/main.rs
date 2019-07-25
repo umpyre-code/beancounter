@@ -16,8 +16,8 @@ extern crate serde_derive;
 #[macro_use]
 extern crate lazy_static;
 extern crate beancounter_grpc;
+extern crate data_encoding;
 extern crate instrumented;
-extern crate rand;
 extern crate regex;
 extern crate toml;
 extern crate url;

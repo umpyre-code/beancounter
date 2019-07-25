@@ -20,10 +20,10 @@ table! {
         id -> Int8,
         created_at -> Timestamp,
         updated_at -> Timestamp,
-        client_id_from -> Nullable<Uuid>,
-        client_id_to -> Nullable<Uuid>,
-        amount_cents -> Int4,
-        message -> Text,
+        client_id_from -> Uuid,
+        client_id_to -> Uuid,
+        payment_cents -> Int4,
+        message_hash -> Text,
     }
 }
 

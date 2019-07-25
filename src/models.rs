@@ -56,3 +56,23 @@ pub struct UpdatedBalance {
     pub balance_cents: i64,
     pub promo_cents: i64,
 }
+
+#[derive(Queryable, Identifiable)]
+pub struct Payment {
+    pub id: i64,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub client_id_from: Uuid,
+    pub client_id_to: Uuid,
+    pub payment_cents: i32,
+    pub message_hash: String,
+}
+
+#[derive(Insertable)]
+#[table_name = "payments"]
+pub struct NewPayment {
+    pub client_id_from: Uuid,
+    pub client_id_to: Uuid,
+    pub payment_cents: i32,
+    pub message_hash: String,
+}

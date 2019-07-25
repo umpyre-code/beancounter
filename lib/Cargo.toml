@@ -5,8 +5,9 @@ authors = ["Brenden Matthews <brenden@brndn.io>"]
 edition = "2018"
 
 [dependencies]
-prost = "0.5"
 bytes = "0.4"
+chrono = "0.4"
+prost = "0.5"
 tower-grpc = "0.1"
 tower-hyper = "0.1"
 

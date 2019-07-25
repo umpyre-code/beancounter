@@ -3,8 +3,6 @@ extern crate bigdecimal;
 use beancounter_grpc::proto;
 use beancounter_grpc::proto::*;
 use beancounter_grpc::tower_grpc::{Code, Request, Response, Status};
-use bigdecimal::BigDecimal;
-use diesel::prelude::*;
 use futures::future::FutureResult;
 use instrumented::{instrument, prometheus, register};
 
@@ -24,7 +22,7 @@ fn make_intcounter(name: &str, description: &str) -> prometheus::IntCounter {
 // Thus, it's calculated like so (w/ Python):
 //   >>> (99999999 - 30) / 1.039
 //   96246360.92396536
-static MAX_PAYMENT_AMOUNT: i32 = 96246360;
+static MAX_PAYMENT_AMOUNT: i32 = 96_246_360;
 
 lazy_static! {
     static ref GET_BALANCE: prometheus::IntCounter =
@@ -68,7 +66,34 @@ impl From<uuid::parser::ParseError> for RequestError {
     }
 }
 
-fn calculate_balances(credit_sum: i64, promo_credit_sum: i64, debit_sum: i64) -> (i64, i64) {
+impl From<&models::Transaction> for Transaction {
+    fn from(tx: &models::Transaction) -> Self {
+        use crate::sql_types::TransactionType;
+        Self {
+            client_id: tx.client_id.unwrap().to_simple().to_string(),
+            created_at: Some(tx.created_at.into()),
+            amount_cents: tx.amount_cents,
+            tx_type: match tx.tx_type {
+                TransactionType::Credit => transaction::Type::Credit,
+                TransactionType::PromoCredit => transaction::Type::PromoCredit,
+                TransactionType::Debit => transaction::Type::Debit,
+            } as i32,
+            settled: tx.settled,
+        }
+    }
+}
+
+impl From<models::Balance> for beancounter_grpc::proto::Balance {
+    fn from(balance: models::Balance) -> Self {
+        Self {
+            client_id: balance.client_id.to_simple().to_string(),
+            balance_cents: balance.balance_cents,
+            promo_cents: balance.promo_cents,
+        }
+    }
+}
+
+fn calculate_balance(credit_sum: i64, promo_credit_sum: i64, debit_sum: i64) -> (i64, i64) {
     // Debits are negative, and credits are positive. Thus, adding a debit to a
     // credit is equivalent to subtraction.
 
@@ -105,28 +130,37 @@ fn update_and_return_balance(
     use schema::transactions::table as transactions;
 
     let credit_sum = transactions
-        .filter(tx_type.eq(TransactionType::Credit))
-        .filter(client_id.eq(client_uuid))
+        .filter(
+            tx_type
+                .eq(TransactionType::Credit)
+                .and(client_id.eq(client_uuid)),
+        )
         .select(sum(amount_cents))
         .first::<Option<i64>>(conn)?
         .unwrap_or_else(|| 0);
 
     let promo_credit_sum = transactions
-        .filter(tx_type.eq(TransactionType::PromoCredit))
-        .filter(client_id.eq(client_uuid))
+        .filter(
+            tx_type
+                .eq(TransactionType::PromoCredit)
+                .and(client_id.eq(client_uuid)),
+        )
         .select(sum(amount_cents))
         .first::<Option<i64>>(conn)?
         .unwrap_or_else(|| 0);
 
     let debit_sum = transactions
-        .filter(tx_type.eq(TransactionType::Debit))
-        .filter(client_id.eq(client_uuid))
+        .filter(
+            tx_type
+                .eq(TransactionType::Debit)
+                .and(client_id.eq(client_uuid)),
+        )
         .select(sum(amount_cents))
         .first::<Option<i64>>(conn)?
         .unwrap_or_else(|| 0);
 
     let (balance_cents_remaining, promo_cents_remaining) =
-        calculate_balances(credit_sum, promo_credit_sum, debit_sum);
+        calculate_balance(credit_sum, promo_credit_sum, debit_sum);
 
     Ok(insert_into(balances)
         .values(&NewBalance {
@@ -143,6 +177,68 @@ fn update_and_return_balance(
         .get_result(conn)?)
 }
 
+#[instrument(INFO)]
+fn add_transaction(
+    client_id_credit: Option<uuid::Uuid>,
+    client_id_debit: Option<uuid::Uuid>,
+    amount_cents: i32,
+    settled: bool,
+    conn: &diesel::r2d2::PooledConnection<diesel::r2d2::ConnectionManager<diesel::PgConnection>>,
+) -> Result<(), diesel::result::Error> {
+    use crate::models::*;
+    use crate::sql_types::*;
+    use diesel::prelude::*;
+    use schema::transactions::table as transactions;
+
+    let tx_credit = NewTransaction {
+        client_id: client_id_credit,
+        tx_type: TransactionType::Credit,
+        amount_cents,
+        settled,
+    };
+    let tx_debit = NewTransaction {
+        client_id: client_id_debit,
+        tx_type: TransactionType::Debit,
+        amount_cents: -amount_cents, // Debits should be negative
+        settled,
+    };
+
+    diesel::insert_into(transactions)
+        .values(&tx_credit)
+        .execute(conn)?;
+
+    diesel::insert_into(transactions)
+        .values(&tx_debit)
+        .execute(conn)?;
+
+    Ok(())
+}
+
+fn get_balance(
+    client_uuid: uuid::Uuid,
+    conn: &diesel::r2d2::PooledConnection<diesel::r2d2::ConnectionManager<diesel::PgConnection>>,
+) -> Result<models::Balance, diesel::result::Error> {
+    use crate::models::*;
+    use crate::schema::balances::columns::*;
+    use crate::schema::balances::table as balances;
+    use diesel::insert_into;
+    use diesel::prelude::*;
+
+    let result = balances.filter(client_id.eq(client_uuid)).first(conn);
+
+    match result {
+        // If the balance record exists, return that
+        Ok(result) => Ok(result),
+        // If there's no record yet, create a new zeroed out balance record.
+        Err(diesel::NotFound) => Ok(insert_into(balances)
+            .values(&NewZeroBalance {
+                client_id: client_uuid,
+            })
+            .get_result(conn)?),
+        Err(err) => Err(err),
+    }
+}
+
 impl BeanCounter {
     pub fn new(
         db_reader: diesel::r2d2::Pool<diesel::r2d2::ConnectionManager<diesel::pg::PgConnection>>,
@@ -155,43 +251,26 @@ impl BeanCounter {
     }
 
     #[instrument(INFO)]
-    fn handle_get_balances(
+    fn handle_get_balance(
         &self,
-        request: &GetBalancesRequest,
-    ) -> Result<GetBalancesResponse, RequestError> {
+        request: &GetBalanceRequest,
+    ) -> Result<GetBalanceResponse, RequestError> {
         use crate::models::*;
-        use crate::sql_types::*;
-        use diesel::dsl::*;
-        use diesel::insert_into;
         use diesel::prelude::*;
         use diesel::result::Error;
-        use schema::balances::columns::*;
-        use schema::balances::table as balances;
         use uuid::Uuid;
 
         let client_uuid = Uuid::parse_str(&request.client_id)?;
 
         let conn = self.db_reader.get().unwrap();
-        let balance = conn.transaction::<Balance, Error, _>(|| {
-            let result = balances.filter(client_id.eq(client_uuid)).first(&conn);
+        let balance = conn.transaction::<Balance, Error, _>(|| get_balance(client_uuid, &conn))?;
 
-            match result {
-                // If the balance record exists, return that
-                Ok(result) => Ok(result),
-                // If there's no record yet, create a new zeroed out balance record.
-                Err(diesel::NotFound) => Ok(insert_into(balances)
-                    .values(&NewZeroBalance {
-                        client_id: client_uuid,
-                    })
-                    .get_result(&conn)?),
-                Err(err) => Err(err),
-            }
-        })?;
-
-        Ok(GetBalancesResponse {
-            client_id: balance.client_id.to_simple().to_string(),
-            balance_cents: balance.balance_cents,
-            promo_cents: balance.promo_cents,
+        Ok(GetBalanceResponse {
+            balance: Some(beancounter_grpc::proto::Balance {
+                client_id: balance.client_id.to_simple().to_string(),
+                balance_cents: balance.balance_cents,
+                promo_cents: balance.promo_cents,
+            }),
         })
     }
 
@@ -200,7 +279,30 @@ impl BeanCounter {
         &self,
         request: &GetTransactionsRequest,
     ) -> Result<GetTransactionsResponse, RequestError> {
-        Err(RequestError::BadArguments)
+        use diesel::prelude::*;
+        use diesel::result::Error;
+        use schema::transactions::columns::*;
+        use schema::transactions::table as transactions;
+        use uuid::Uuid;
+
+        let client_uuid = Uuid::parse_str(&request.client_id)?;
+
+        let conn = self.db_reader.get().unwrap();
+        let tx_vec =
+            conn.transaction::<Vec<beancounter_grpc::proto::Transaction>, Error, _>(|| {
+                let result = transactions
+                    .filter(client_id.eq(client_uuid))
+                    .get_results(&conn)?;
+
+                Ok(result
+                    .iter()
+                    .map(beancounter_grpc::proto::Transaction::from)
+                    .collect())
+            })?;
+
+        Ok(GetTransactionsResponse {
+            transactions: tx_vec,
+        })
     }
 
     #[instrument(INFO)]
@@ -209,45 +311,21 @@ impl BeanCounter {
         request: &AddCreditsRequest,
     ) -> Result<AddCreditsResponse, RequestError> {
         use crate::models::*;
-        use crate::sql_types::*;
         use diesel::prelude::*;
         use diesel::result::Error;
-        use schema::transactions::table as transactions;
         use uuid::Uuid;
 
         let client_uuid = Uuid::parse_str(&request.client_id)?;
 
-        let tx_credit = NewTransaction {
-            client_id: Some(client_uuid),
-            tx_type: TransactionType::Credit,
-            amount_cents: request.amount_cents,
-            settled: true,
-        };
-        let tx_debit = NewTransaction {
-            client_id: None,
-            tx_type: TransactionType::Debit,
-            amount_cents: -request.amount_cents,
-            settled: true,
-        };
         let conn = self.db_writer.get().unwrap();
         let balance = conn.transaction::<Balance, Error, _>(|| {
-            diesel::insert_into(transactions)
-                .values(&tx_credit)
-                .execute(&conn)?;
+            add_transaction(Some(client_uuid), None, request.amount_cents, true, &conn)?;
 
-            diesel::insert_into(transactions)
-                .values(&tx_debit)
-                .execute(&conn)?;
-
-            let balance = update_and_return_balance(client_uuid, &conn)?;
-
-            Ok(balance)
+            Ok(update_and_return_balance(client_uuid, &conn)?)
         })?;
 
         Ok(AddCreditsResponse {
-            client_id: client_uuid.to_simple().to_string(),
-            balance_cents: balance.balance_cents,
-            promo_cents: balance.promo_cents,
+            balance: Some(balance.into()),
         })
     }
 
@@ -264,7 +342,76 @@ impl BeanCounter {
         &self,
         request: &AddPaymentRequest,
     ) -> Result<AddPaymentResponse, RequestError> {
-        Err(RequestError::BadArguments)
+        use crate::models::NewPayment;
+        use crate::models::*;
+        use data_encoding::BASE64_NOPAD;
+        use diesel::insert_into;
+        use diesel::prelude::*;
+        use diesel::result::Error;
+        use schema::payments::table as payments;
+        use uuid::Uuid;
+
+        let client_uuid_from = Uuid::parse_str(&request.client_id_from)?;
+        let client_uuid_to = Uuid::parse_str(&request.client_id_to)?;
+
+        let payment_cents = request.payment_cents;
+        let fee_cents = (f64::from(payment_cents) * 0.15).floor() as i32;
+        let total_amount = payment_cents + fee_cents;
+
+        // Any payment over this amount will never go through
+        if total_amount >= MAX_PAYMENT_AMOUNT {
+            return Ok(AddPaymentResponse {
+                result: add_payment_response::Result::InvalidAmount as i32,
+                payment_cents: 0,
+                fee_cents: 0,
+                balance: None,
+            });
+        }
+
+        let conn = self.db_writer.get().unwrap();
+        // Check the sender balance, make sure it's sufficient.
+        let balance = get_balance(client_uuid_from, &conn)?;
+        if balance.balance_cents + balance.promo_cents < i64::from(total_amount) {
+            return Ok(AddPaymentResponse {
+                result: add_payment_response::Result::InsufficientBalance as i32,
+                payment_cents: 0,
+                fee_cents: 0,
+                balance: Some(balance.into()),
+            });
+        }
+
+        let balance = conn.transaction::<Balance, Error, _>(|| {
+            // Credit the recipient account, debit the sender. This TX is
+            // refundable, thus we mark it as not being settled.
+            add_transaction(
+                Some(client_uuid_to),
+                Some(client_uuid_from),
+                payment_cents,
+                false,
+                &conn,
+            )?;
+
+            // Credit the cash account, debit the sender. This TX is non-refundable.
+            add_transaction(None, Some(client_uuid_from), fee_cents, true, &conn)?;
+
+            // Finally, create a payment record.
+            let payment = NewPayment {
+                client_id_from: client_uuid_from,
+                client_id_to: client_uuid_to,
+                payment_cents,
+                message_hash: BASE64_NOPAD.encode(&request.message_hash),
+            };
+            insert_into(payments).values(&payment).execute(&conn)?;
+
+            Ok(update_and_return_balance(client_uuid_from, &conn)?)
+        })?;
+
+        Ok(AddPaymentResponse {
+            result: add_payment_response::Result::Success as i32,
+            payment_cents,
+            fee_cents,
+            balance: Some(balance.into()),
+        })
     }
 
     #[instrument(INFO)]
@@ -277,7 +424,7 @@ impl BeanCounter {
 }
 
 impl proto::server::BeanCounter for BeanCounter {
-    type GetBalancesFuture = FutureResult<Response<GetBalancesResponse>, Status>;
+    type GetBalanceFuture = FutureResult<Response<GetBalanceResponse>, Status>;
     type GetTransactionsFuture = FutureResult<Response<GetTransactionsResponse>, Status>;
     type AddCreditsFuture = FutureResult<Response<AddCreditsResponse>, Status>;
     type WithdrawCreditsFuture = FutureResult<Response<WithdrawCreditsResponse>, Status>;
@@ -285,10 +432,10 @@ impl proto::server::BeanCounter for BeanCounter {
     type SettlePaymentFuture = FutureResult<Response<SettlePaymentResponse>, Status>;
     type CheckFuture = FutureResult<Response<HealthCheckResponse>, Status>;
 
-    /// Get account balances
-    fn get_balances(&mut self, request: Request<GetBalancesRequest>) -> Self::GetBalancesFuture {
+    /// Get account balance
+    fn get_balance(&mut self, request: Request<GetBalanceRequest>) -> Self::GetBalanceFuture {
         use futures::future::IntoFuture;
-        self.handle_get_balances(request.get_ref())
+        self.handle_get_balance(request.get_ref())
             .map(Response::new)
             .map_err(|err| Status::new(Code::InvalidArgument, err.to_string()))
             .into_future()
@@ -359,11 +506,13 @@ impl proto::server::BeanCounter for BeanCounter {
 
 #[cfg(test)]
 mod tests {
+    extern crate rand;
 
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
     use diesel::dsl::*;
     use diesel::pg::PgConnection;
+    use diesel::prelude::*;
     use diesel::r2d2::{ConnectionManager, Pool};
     use std::sync::Mutex;
     use uuid::Uuid;
@@ -399,11 +548,27 @@ mod tests {
         empty_tables![transactions, balances, payments];
     }
 
+    fn check_zero_sum(
+        db_pool: &diesel::r2d2::Pool<diesel::r2d2::ConnectionManager<diesel::pg::PgConnection>>,
+    ) {
+        let conn = db_pool.get().unwrap();
+
+        // All credits are positive, and all debits are negative. When summed,
+        // they should always balance out to 0.
+        let tx_sum = schema::transactions::table
+            .select(sum(schema::transactions::dsl::amount_cents))
+            .first::<Option<i64>>(&conn)
+            .unwrap();
+        assert_eq!(Some(0), tx_sum);
+    }
+
     #[test]
     fn test_add_credits() {
         use diesel::prelude::*;
         use schema::transactions::columns::*;
         use schema::transactions::table as transactions;
+
+        let _lock = LOCK.lock().unwrap();
 
         let (db_pool,) = get_pools();
 
@@ -421,13 +586,13 @@ mod tests {
             let amount = 100;
             let result = beancounter.handle_add_credits(&AddCreditsRequest {
                 client_id: uuid.clone(),
-                amount_cents: 100,
+                amount_cents: amount,
             });
 
             assert!(result.is_ok());
-            let result = result.unwrap();
-            assert_eq!(result.balance_cents, amount);
-            assert_eq!(result.promo_cents, 0);
+            let balance = result.unwrap().balance.unwrap();
+            assert_eq!(balance.balance_cents, i64::from(amount));
+            assert_eq!(balance.promo_cents, 0);
         }
 
         let conn = db_pool.get().unwrap();
@@ -435,61 +600,257 @@ mod tests {
         let tx_count = transactions.select(count(id)).first(&conn);
         assert_eq!(Ok(200), tx_count);
 
-        // All credits are positive, and all debits are negative. When summed,
-        // they should always balance out to 0.
-        let tx_sum = transactions
-            .select(sum(amount_cents))
-            .first::<Option<i64>>(&conn)
-            .unwrap();
-        assert_eq!(Some(0), tx_sum);
+        check_zero_sum(&db_pool);
 
         for uuid in uuids.iter() {
-            let balance_result = beancounter.handle_get_balances(&GetBalancesRequest {
+            let balance_result = beancounter.handle_get_balance(&GetBalanceRequest {
                 client_id: uuid.clone(),
             });
 
             assert!(balance_result.is_ok());
-            let balance_result = balance_result.unwrap();
-            assert_eq!(balance_result.balance_cents, 100);
-            assert_eq!(balance_result.promo_cents, 0);
+            let balance = balance_result.unwrap().balance.unwrap();
+            assert_eq!(balance.balance_cents, 100);
+            assert_eq!(balance.promo_cents, 0);
         }
     }
 
     #[test]
-    fn test_calculate_balances() {
-        let (balance, promo) = calculate_balances(0, 0, 0);
+    fn test_calculate_balance() {
+        let (balance, promo) = calculate_balance(0, 0, 0);
         assert_eq!(balance, 0);
         assert_eq!(promo, 0);
 
-        let (balance, promo) = calculate_balances(10, 0, 0);
+        let (balance, promo) = calculate_balance(10, 0, 0);
         assert_eq!(balance, 10);
         assert_eq!(promo, 0);
 
-        let (balance, promo) = calculate_balances(10, 0, -10);
-        println!("{} {}", balance, promo);
+        let (balance, promo) = calculate_balance(10, 0, -10);
         assert_eq!(balance, 0);
         assert_eq!(promo, 0);
 
-        let (balance, promo) = calculate_balances(10, 10, -10);
+        let (balance, promo) = calculate_balance(10, 10, -10);
         assert_eq!(balance, 10);
         assert_eq!(promo, 0);
 
-        let (balance, promo) = calculate_balances(10, 10, -20);
+        let (balance, promo) = calculate_balance(10, 10, -20);
         assert_eq!(balance, 0);
         assert_eq!(promo, 0);
 
-        let (balance, promo) = calculate_balances(0, 10, -10);
+        let (balance, promo) = calculate_balance(0, 10, -10);
         assert_eq!(balance, 0);
         assert_eq!(promo, 0);
 
-        // These cases (negative balances) should never occur, but we test for
+        // These cases (negative balance) should never occur, but we test for
         // it here anyway, just to make sure the math is right.
-        let (balance, promo) = calculate_balances(0, 10, -20);
+        let (balance, promo) = calculate_balance(0, 10, -20);
         assert_eq!(balance, -10);
         assert_eq!(promo, 0);
 
-        let (balance, promo) = calculate_balances(10, 0, -20);
+        let (balance, promo) = calculate_balance(10, 0, -20);
         assert_eq!(balance, -10);
         assert_eq!(promo, 0);
+    }
+
+    #[test]
+    fn test_get_balance() {
+        use rand::Rng;
+
+        let _lock = LOCK.lock().unwrap();
+
+        let (db_pool,) = get_pools();
+
+        empty_tables(&db_pool);
+
+        let beancounter = BeanCounter::new(db_pool.clone(), db_pool.clone());
+
+        // A fresh new client_id returns a zero balance.
+        let balance_result = beancounter.handle_get_balance(&GetBalanceRequest {
+            client_id: Uuid::new_v4().to_simple().to_string(),
+        });
+
+        assert!(balance_result.is_ok());
+        let balance = balance_result.unwrap().balance.unwrap();
+        assert_eq!(balance.balance_cents, 0);
+        assert_eq!(balance.promo_cents, 0);
+
+        // Add some credits to a new client, check the balance
+        let mut rng = rand::thread_rng();
+        let uuid = Uuid::new_v4().to_simple().to_string();
+        let amount = rng.gen_range(0, 999_999_999);
+        let result = beancounter.handle_add_credits(&AddCreditsRequest {
+            client_id: uuid.clone(),
+            amount_cents: amount,
+        });
+
+        assert!(result.is_ok());
+        let balance = result.unwrap().balance.unwrap();
+        assert_eq!(balance.balance_cents, i64::from(amount));
+        assert_eq!(balance.promo_cents, 0);
+
+        let balance_result = beancounter.handle_get_balance(&GetBalanceRequest { client_id: uuid });
+
+        assert!(balance_result.is_ok());
+        let balance = balance_result.unwrap().balance.unwrap();
+        assert_eq!(balance.balance_cents, i64::from(amount));
+        assert_eq!(balance.promo_cents, 0);
+        check_zero_sum(&db_pool);
+    }
+
+    #[test]
+    fn test_get_transactions() {
+        use crate::sql_types::TransactionType;
+        use rand::Rng;
+
+        let _lock = LOCK.lock().unwrap();
+
+        let (db_pool,) = get_pools();
+
+        empty_tables(&db_pool);
+
+        let beancounter = BeanCounter::new(db_pool.clone(), db_pool.clone());
+
+        let uuid = Uuid::new_v4().to_simple().to_string();
+
+        // Brand new client, no transactions (yet)
+        let tx_result = beancounter.handle_get_transactions(&GetTransactionsRequest {
+            client_id: uuid.clone(),
+        });
+
+        assert!(tx_result.is_ok());
+        let tx_result = tx_result.unwrap();
+        assert!(tx_result.transactions.is_empty());
+
+        // Add some credits to a new client, check the balance
+        let mut rng = rand::thread_rng();
+        let uuid = Uuid::new_v4().to_simple().to_string();
+        let amount = rng.gen_range(0, 999_999_999);
+        let result = beancounter.handle_add_credits(&AddCreditsRequest {
+            client_id: uuid.clone(),
+            amount_cents: amount,
+        });
+
+        assert!(result.is_ok());
+        let balance = result.unwrap().balance.unwrap();
+        assert_eq!(balance.balance_cents, i64::from(amount));
+        assert_eq!(balance.promo_cents, 0);
+
+        // There should be some TXs present now
+        let tx_result = beancounter.handle_get_transactions(&GetTransactionsRequest {
+            client_id: uuid.clone(),
+        });
+
+        assert!(tx_result.is_ok());
+        let tx_result = tx_result.unwrap();
+        assert!(!tx_result.transactions.is_empty());
+        assert_eq!(tx_result.transactions.len(), 1);
+        assert_eq!(tx_result.transactions[0].amount_cents, amount);
+        assert_eq!(
+            tx_result.transactions[0].tx_type,
+            transaction::Type::Credit as i32
+        );
+
+        let conn = db_pool.get().unwrap();
+
+        // Check there's a corresponding debit against the umpyre cash account
+        let result: Vec<models::Transaction> = schema::transactions::table
+            .filter(schema::transactions::dsl::client_id.is_null())
+            .get_results(&conn)
+            .unwrap();
+
+        assert!(!result.is_empty());
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].amount_cents, -amount);
+        assert_eq!(result[0].tx_type, TransactionType::Debit);
+
+        check_zero_sum(&db_pool);
+    }
+
+    #[test]
+    fn test_add_payment() {
+        use rand::RngCore;
+
+        let _lock = LOCK.lock().unwrap();
+
+        let (db_pool,) = get_pools();
+
+        empty_tables(&db_pool);
+
+        let beancounter = BeanCounter::new(db_pool.clone(), db_pool.clone());
+
+        for payment_amount in 0..250 {
+            let client_uuid_from = Uuid::new_v4().to_simple().to_string();
+            let client_uuid_to = Uuid::new_v4().to_simple().to_string();
+            let mut message_hash = vec![0u8; 32];
+            rand::thread_rng().fill_bytes(&mut message_hash);
+
+            if payment_amount > 0 {
+                // This should fail due to insufficient balance
+                let result = beancounter.handle_add_payment(&AddPaymentRequest {
+                    client_id_from: client_uuid_from.clone(),
+                    client_id_to: client_uuid_to.clone(),
+                    message_hash: message_hash.clone(),
+                    payment_cents: payment_amount,
+                });
+
+                assert!(result.is_ok());
+                let result = result.unwrap();
+                assert_eq!(
+                    result.result,
+                    add_payment_response::Result::InsufficientBalance as i32
+                );
+                assert_eq!(result.payment_cents, 0);
+            }
+
+            // Add some credits to sender's account
+            let result = beancounter.handle_add_credits(&AddCreditsRequest {
+                client_id: client_uuid_from.clone(),
+                amount_cents: payment_amount,
+            });
+
+            assert!(result.is_ok());
+            let balance = result.unwrap().balance.unwrap();
+            assert_eq!(balance.balance_cents, i64::from(payment_amount));
+            assert_eq!(balance.promo_cents, 0);
+
+            if payment_amount > 7 {
+                // This should still fail due to insufficient balance, because we're not
+                // accounting for the fee
+                let result = beancounter.handle_add_payment(&AddPaymentRequest {
+                    client_id_from: client_uuid_from.clone(),
+                    client_id_to: client_uuid_to.clone(),
+                    message_hash: message_hash.clone(),
+                    payment_cents: payment_amount,
+                });
+
+                assert!(result.is_ok());
+                let result = result.unwrap();
+                assert_eq!(
+                    result.result,
+                    add_payment_response::Result::InsufficientBalance as i32
+                );
+                assert_eq!(result.payment_cents, 0);
+            }
+
+            // Try again, but reduce the payment so that we can afford the fee
+            // This should still fail due to insufficient balance, because we're not
+            // accounting for the fee
+            let payment_cents = (f64::from(payment_amount) / 1.15).round() as i32;
+            let fee_cents = (f64::from(payment_cents) * 0.15).floor() as i32;
+            let result = beancounter.handle_add_payment(&AddPaymentRequest {
+                client_id_from: client_uuid_from.clone(),
+                client_id_to: client_uuid_to.clone(),
+                message_hash: message_hash.clone(),
+                payment_cents,
+            });
+
+            assert!(result.is_ok());
+            let result = result.unwrap();
+            assert_eq!(result.result, add_payment_response::Result::Success as i32);
+            println!("{} {}", payment_amount, payment_cents);
+            assert_eq!(result.payment_cents, payment_cents);
+            assert_eq!(result.fee_cents, fee_cents);
+        }
+
+        check_zero_sum(&db_pool);
     }
 }

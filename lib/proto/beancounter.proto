@@ -5,7 +5,7 @@ option java_package = "beancounter";
 
 service BeanCounter {
   // Get account balances
-  rpc GetBalances(GetBalancesRequest) returns (GetBalancesResponse);
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
 
   // Get transactions
   rpc GetTransactions(GetTransactionsRequest) returns (GetTransactionsResponse);
@@ -43,11 +43,7 @@ message AddCreditsRequest {
   string client_id = 1;
   int32 amount_cents = 2;
 }
-message AddCreditsResponse {
-  string client_id = 1;
-  int64 balance_cents = 2;
-  int64 promo_cents = 3;
-}
+message AddCreditsResponse { Balance balance = 1; }
 
 message WithdrawCreditsRequest { string client_id = 1; }
 message WithdrawCreditsResponse { string client_id = 1; }
@@ -56,13 +52,21 @@ message AddPaymentRequest {
   string client_id_from = 1;
   string client_id_to = 2;
   bytes message_hash = 3;
-  int32 amount_cents = 4;
+  int32 payment_cents = 4;
 }
 message AddPaymentResponse {
+  enum Result {
+    SUCCESS = 0;
+    INSUFFICIENT_BALANCE = 1;
+    INVALID_AMOUNT = 2;
+  }
+  Result result = 1;
   // The non-refundable Umpyre fee
-  int32 fee_cents = 1;
+  int32 fee_cents = 2;
   // The payment amount
-  int32 payment_cents = 2;
+  int32 payment_cents = 3;
+  // Remaining balance for client_id_from
+  Balance balance = 4;
 }
 
 message SettlePaymentRequest { bytes message_hash = 1; }
@@ -73,12 +77,8 @@ message SettlePaymentResponse {
   int32 payment_cents = 2;
 }
 
-message GetBalancesRequest { string client_id = 1; }
-message GetBalancesResponse {
-  string client_id = 1;
-  int64 balance_cents = 2;
-  int64 promo_cents = 3;
-}
+message GetBalanceRequest { string client_id = 1; }
+message GetBalanceResponse { Balance balance = 1; }
 
 message Transaction {
   enum Type {
@@ -87,16 +87,20 @@ message Transaction {
     PROMO_CREDIT = 2;
   }
   Timestamp created_at = 1;
-  Type type = 2;
+  Type tx_type = 2;
   string client_id = 3;
-  int64 amount_cents = 4;
+  int32 amount_cents = 4;
+  bool settled = 5;
+}
+
+message Balance {
+  string client_id = 1;
+  int64 balance_cents = 2;
+  int64 promo_cents = 3;
 }
 
 message GetTransactionsRequest { string client_id = 1; }
-message GetTransactionsResponse {
-  string client_id = 1;
-  repeated Transaction transactions = 2;
-}
+message GetTransactionsResponse { repeated Transaction transactions = 1; }
 
 message HealthCheckRequest { string service = 1; }
 
