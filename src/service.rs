@@ -8,6 +8,7 @@ use instrumented::{instrument, prometheus, register};
 
 use crate::models;
 use crate::schema;
+use crate::stripe_client;
 
 fn make_intcounter(name: &str, description: &str) -> prometheus::IntCounter {
     let counter = prometheus::IntCounter::new(name, description).unwrap();
@@ -15,18 +16,59 @@ fn make_intcounter(name: &str, description: &str) -> prometheus::IntCounter {
     counter
 }
 
-// This amount is calculated by subtracting Stripe's maximum fee of 3.9% + 30C
+// This amount is calculated by subtracting Stripe's maximum fee of 2.9% + 30c
 // from their charge maximum, which is $999,999.99 according to
 // https://stripe.com/docs/currencies#minimum-and-maximum-charge-amounts.
-// The base 2.9% + 30C fee also includes an optional fee of 1% for foreign cards.
 // Thus, it's calculated like so (w/ Python):
-//   >>> (99999999 - 30) / 1.039
-//   96246360.92396536
-static MAX_PAYMENT_AMOUNT: i32 = 96_246_360;
+//   >>> (99999999 - 30) / 1.029
+//   97181699.70845482
+static MAX_PAYMENT_AMOUNT: i32 = 97_181_699;
 
 lazy_static! {
-    static ref GET_BALANCE: prometheus::IntCounter =
-        make_intcounter("get_balance", "get_balance called");
+    static ref PAYMENT_ADDED: prometheus::HistogramVec = {
+        let histogram_opts = prometheus::HistogramOpts::new(
+            "payment_added_amount",
+            "Histogram of payment added amounts",
+        );
+        let histogram = prometheus::HistogramVec::new(histogram_opts, &[]).unwrap();
+
+        register(Box::new(histogram.clone())).unwrap();
+
+        histogram
+    };
+    static ref PAYMENT_ADDED_FEE: prometheus::HistogramVec = {
+        let histogram_opts = prometheus::HistogramOpts::new(
+            "payment_added_fee_amount",
+            "Histogram of payment added fee amounts",
+        );
+        let histogram = prometheus::HistogramVec::new(histogram_opts, &[]).unwrap();
+
+        register(Box::new(histogram.clone())).unwrap();
+
+        histogram
+    };
+    static ref PAYMENT_SETTLED: prometheus::HistogramVec = {
+        let histogram_opts = prometheus::HistogramOpts::new(
+            "payment_settled_amount",
+            "Histogram of payment settled amounts",
+        );
+        let histogram = prometheus::HistogramVec::new(histogram_opts, &[]).unwrap();
+
+        register(Box::new(histogram.clone())).unwrap();
+
+        histogram
+    };
+    static ref PAYMENT_SETTLED_FEE: prometheus::HistogramVec = {
+        let histogram_opts = prometheus::HistogramOpts::new(
+            "payment_settled_fee_amount",
+            "Histogram of payment settled fee amounts",
+        );
+        let histogram = prometheus::HistogramVec::new(histogram_opts, &[]).unwrap();
+
+        register(Box::new(histogram.clone())).unwrap();
+
+        histogram
+    };
 }
 
 #[derive(Clone)]
@@ -45,6 +87,16 @@ enum RequestError {
     InvalidClientId { err: String },
     #[fail(display = "Bad arguments specified for request")]
     BadArguments,
+    #[fail(display = "stripe error: {}", err)]
+    StripeError { err: String },
+}
+
+impl From<stripe_client::StripeError> for RequestError {
+    fn from(err: stripe_client::StripeError) -> Self {
+        Self::StripeError {
+            err: err.to_string(),
+        }
+    }
 }
 
 impl From<diesel::result::Error> for RequestError {
@@ -182,7 +234,7 @@ fn add_transaction(
     client_id_debit: Option<uuid::Uuid>,
     amount_cents: i32,
     conn: &diesel::r2d2::PooledConnection<diesel::r2d2::ConnectionManager<diesel::PgConnection>>,
-) -> Result<(), diesel::result::Error> {
+) -> Result<(models::Transaction, models::Transaction), diesel::result::Error> {
     use crate::models::*;
     use crate::sql_types::*;
     use diesel::prelude::*;
@@ -199,15 +251,15 @@ fn add_transaction(
         amount_cents: -amount_cents, // Debits should be negative
     };
 
-    diesel::insert_into(transactions)
+    let tx_credit = diesel::insert_into(transactions)
         .values(&tx_credit)
-        .execute(conn)?;
+        .get_result::<Transaction>(conn)?;
 
-    diesel::insert_into(transactions)
+    let tx_debit = diesel::insert_into(transactions)
         .values(&tx_debit)
-        .execute(conn)?;
+        .get_result::<Transaction>(conn)?;
 
-    Ok(())
+    Ok((tx_credit, tx_debit))
 }
 
 fn get_balance(
@@ -380,14 +432,9 @@ impl BeanCounter {
             // Zero value payments are perfectly valid; they simply don't generate
             // a TX
             if total_amount > 0 {
-                // Credit the recipient account, debit the sender. This TX is
+                // Credit the cash account, debit the sender. This TX is
                 // refundable.
-                add_transaction(
-                    Some(client_uuid_to),
-                    Some(client_uuid_from),
-                    payment_cents,
-                    &conn,
-                )?;
+                add_transaction(None, Some(client_uuid_from), payment_cents, &conn)?;
 
                 // Credit the cash account, debit the sender. This TX is non-refundable.
                 add_transaction(None, Some(client_uuid_from), fee_cents, &conn)?;
@@ -405,6 +452,13 @@ impl BeanCounter {
             Ok(update_and_return_balance(client_uuid_from, &conn)?)
         })?;
 
+        PAYMENT_ADDED
+            .with_label_values(&[])
+            .observe(f64::from(payment_cents));
+        PAYMENT_ADDED_FEE
+            .with_label_values(&[])
+            .observe(f64::from(fee_cents));
+
         Ok(AddPaymentResponse {
             result: add_payment_response::Result::Success as i32,
             payment_cents,
@@ -418,7 +472,116 @@ impl BeanCounter {
         &self,
         request: &SettlePaymentRequest,
     ) -> Result<SettlePaymentResponse, RequestError> {
-        Err(RequestError::BadArguments)
+        use crate::models::*;
+        use crate::schema::payments::columns::*;
+        use crate::schema::payments::table as payments;
+        use data_encoding::BASE64_NOPAD;
+        use diesel::prelude::*;
+        use diesel::result::Error;
+
+        let conn = self.db_writer.get().unwrap();
+        let (payment_amount_after_fee, fee_amount, balance) = conn
+            .transaction::<(i32, i32, Balance), Error, _>(|| {
+                let payment: Payment = payments
+                    .filter(message_hash.eq(BASE64_NOPAD.encode(&request.message_hash)))
+                    .first(&conn)?;
+
+                // If there's a valid payment, perform settlement
+                let fee_amount = (f64::from(payment.payment_cents) * 0.15).floor() as i32;
+                let payment_amount_after_fee = payment.payment_cents - fee_amount;
+
+                // Add TX from umpyre cash account to recipient
+                add_transaction(
+                    Some(payment.client_id_to),
+                    None,
+                    payment_amount_after_fee,
+                    &conn,
+                )?;
+
+                // delete the payment
+                diesel::delete(payments)
+                    .filter(message_hash.eq(BASE64_NOPAD.encode(&request.message_hash)))
+                    .execute(&conn)?;
+
+                let balance = update_and_return_balance(payment.client_id_to, &conn)?;
+
+                Ok((payment_amount_after_fee, fee_amount, balance))
+            })?;
+
+        PAYMENT_SETTLED
+            .with_label_values(&[])
+            .observe(f64::from(payment_amount_after_fee));
+        PAYMENT_SETTLED_FEE
+            .with_label_values(&[])
+            .observe(f64::from(fee_amount));
+
+        Ok(SettlePaymentResponse {
+            fee_cents: fee_amount,
+            payment_cents: payment_amount_after_fee,
+            balance: Some(balance.into()),
+        })
+    }
+
+    #[instrument(INFO)]
+    fn handle_stripe_charge(
+        &self,
+        request: &StripeChargeRequest,
+    ) -> Result<StripeChargeResponse, RequestError> {
+        use crate::models::*;
+        use crate::stripe_client::*;
+        use diesel::connection::TransactionManager;
+        use diesel::prelude::*;
+        use diesel::result::Error;
+        use uuid::Uuid;
+
+        let client_uuid = Uuid::parse_str(&request.client_id)?;
+
+        let conn = self.db_writer.get().unwrap();
+        let transaction_manager = conn.transaction_manager();
+        transaction_manager.begin_transaction(&conn)?;
+
+        let stripe_fee_amount_cents =
+            Stripe::calculate_stripe_fees(i64::from(request.amount_cents));
+
+        // Add TX from cash account to client
+        let (tx_credit, tx_debit) =
+            add_transaction(Some(client_uuid), None, request.amount_cents, &conn)?;
+
+        let stripe = Stripe::new();
+
+        let charge_result = stripe.charge(
+            &request.token,
+            i64::from(request.amount_cents),
+            &request.client_id,
+            tx_credit.id,
+        );
+
+        let result = match charge_result {
+            Ok(charge) => {
+                let balance = update_and_return_balance(client_uuid, &conn)?;
+                Ok(StripeChargeResponse {
+                    result: stripe_charge_response::Result::Success as i32,
+                    api_response: serde_json::to_string(&charge).unwrap(),
+                    balance: Some(balance.into()),
+                })
+            }
+            Err(StripeError::RequestError { err, request_error }) => Ok(StripeChargeResponse {
+                result: stripe_charge_response::Result::Failure as i32,
+                api_response: serde_json::to_string(&request_error).unwrap(),
+                balance: None,
+            }),
+            Err(err) => Err(err.into()),
+        };
+        match result {
+            Ok(value) => {
+                transaction_manager.commit_transaction(&conn)?;
+                Ok(value)
+            }
+            Err(err) => {
+                transaction_manager.rollback_transaction(&conn)?;
+                Err(err)
+            }
+        }
     }
 }
 
@@ -429,6 +592,7 @@ impl proto::server::BeanCounter for BeanCounter {
     type WithdrawCreditsFuture = FutureResult<Response<WithdrawCreditsResponse>, Status>;
     type AddPaymentFuture = FutureResult<Response<AddPaymentResponse>, Status>;
     type SettlePaymentFuture = FutureResult<Response<SettlePaymentResponse>, Status>;
+    type StripeChargeFuture = FutureResult<Response<StripeChargeResponse>, Status>;
     type CheckFuture = FutureResult<Response<HealthCheckResponse>, Status>;
 
     /// Get account balance
@@ -489,6 +653,15 @@ impl proto::server::BeanCounter for BeanCounter {
     ) -> Self::SettlePaymentFuture {
         use futures::future::IntoFuture;
         self.handle_settle_payment(request.get_ref())
+            .map(Response::new)
+            .map_err(|err| Status::new(Code::InvalidArgument, err.to_string()))
+            .into_future()
+    }
+
+    /// Create a stripe charge
+    fn stripe_charge(&mut self, request: Request<StripeChargeRequest>) -> Self::StripeChargeFuture {
+        use futures::future::IntoFuture;
+        self.handle_stripe_charge(request.get_ref())
             .map(Response::new)
             .map_err(|err| Status::new(Code::InvalidArgument, err.to_string()))
             .into_future()
@@ -776,7 +949,7 @@ mod tests {
 
         let beancounter = BeanCounter::new(db_pool.clone(), db_pool.clone());
 
-        for payment_amount in 0..250 {
+        for payment_amount in 0..50 {
             let client_uuid_from = Uuid::new_v4().to_simple().to_string();
             let client_uuid_to = Uuid::new_v4().to_simple().to_string();
             let mut message_hash = vec![0u8; 32];
@@ -855,7 +1028,7 @@ mod tests {
                 get_balance(Uuid::parse_str(&client_uuid_from).unwrap(), &conn).unwrap();
             assert_eq!(
                 sender_balance.balance_cents,
-                (payment_amount - (payment_cents + fee_cents)).into()
+                i64::from(payment_amount - (payment_cents + fee_cents))
             );
             assert_eq!(sender_balance.promo_cents, 0);
 
@@ -864,6 +1037,135 @@ mod tests {
                 get_balance(Uuid::parse_str(&client_uuid_to).unwrap(), &conn).unwrap();
             assert_eq!(recipient_balance.balance_cents, 0);
             assert_eq!(recipient_balance.promo_cents, 0);
+        }
+
+        check_zero_sum(&db_pool);
+    }
+
+    #[test]
+    fn test_settle_payment() {
+        use rand::RngCore;
+
+        let _lock = LOCK.lock().unwrap();
+
+        let (db_pool,) = get_pools();
+
+        empty_tables(&db_pool);
+
+        let beancounter = BeanCounter::new(db_pool.clone(), db_pool.clone());
+
+        for payment_amount in 0..50 {
+            let client_uuid_from = Uuid::new_v4().to_simple().to_string();
+            let client_uuid_to = Uuid::new_v4().to_simple().to_string();
+            let mut message_hash = vec![0u8; 32];
+            rand::thread_rng().fill_bytes(&mut message_hash);
+
+            if payment_amount > 0 {
+                // This should fail due to insufficient balance
+                let result = beancounter.handle_add_payment(&AddPaymentRequest {
+                    client_id_from: client_uuid_from.clone(),
+                    client_id_to: client_uuid_to.clone(),
+                    message_hash: message_hash.clone(),
+                    payment_cents: payment_amount,
+                });
+
+                assert!(result.is_ok());
+                let result = result.unwrap();
+                assert_eq!(
+                    result.result,
+                    add_payment_response::Result::InsufficientBalance as i32
+                );
+                assert_eq!(result.payment_cents, 0);
+            }
+
+            // Add some credits to sender's account
+            let result = beancounter.handle_add_credits(&AddCreditsRequest {
+                client_id: client_uuid_from.clone(),
+                amount_cents: payment_amount,
+            });
+
+            assert!(result.is_ok());
+            let balance = result.unwrap().balance.unwrap();
+            assert_eq!(balance.balance_cents, i64::from(payment_amount));
+            assert_eq!(balance.promo_cents, 0);
+
+            if payment_amount > 7 {
+                // This should still fail due to insufficient balance, because we're not
+                // accounting for the fee
+                let result = beancounter.handle_add_payment(&AddPaymentRequest {
+                    client_id_from: client_uuid_from.clone(),
+                    client_id_to: client_uuid_to.clone(),
+                    message_hash: message_hash.clone(),
+                    payment_cents: payment_amount,
+                });
+
+                assert!(result.is_ok());
+                let result = result.unwrap();
+                assert_eq!(
+                    result.result,
+                    add_payment_response::Result::InsufficientBalance as i32
+                );
+                assert_eq!(result.payment_cents, 0);
+            }
+
+            // Try again, but reduce the payment so that we can afford the fee
+            // This should still fail due to insufficient balance, because we're not
+            // accounting for the fee
+            let payment_cents = (f64::from(payment_amount) / 1.15).round() as i32;
+            let fee_cents = (f64::from(payment_cents) * 0.15).floor() as i32;
+            let result = beancounter.handle_add_payment(&AddPaymentRequest {
+                client_id_from: client_uuid_from.clone(),
+                client_id_to: client_uuid_to.clone(),
+                message_hash: message_hash.clone(),
+                payment_cents,
+            });
+
+            assert!(result.is_ok());
+            let result = result.unwrap();
+            assert_eq!(result.result, add_payment_response::Result::Success as i32);
+            assert_eq!(result.payment_cents, payment_cents);
+            assert_eq!(result.fee_cents, fee_cents);
+
+            let conn = db_pool.get().unwrap();
+
+            // Check balance of sender
+            let sender_balance =
+                get_balance(Uuid::parse_str(&client_uuid_from).unwrap(), &conn).unwrap();
+            assert_eq!(
+                sender_balance.balance_cents,
+                i64::from(payment_amount - (payment_cents + fee_cents))
+            );
+            assert_eq!(sender_balance.promo_cents, 0);
+
+            // Check balance of recipient--should be zero
+            let recipient_balance =
+                get_balance(Uuid::parse_str(&client_uuid_to).unwrap(), &conn).unwrap();
+            assert_eq!(recipient_balance.balance_cents, 0);
+            assert_eq!(recipient_balance.promo_cents, 0);
+
+            // Try and settle the payment
+            let result = beancounter.handle_settle_payment(&SettlePaymentRequest {
+                message_hash: message_hash.clone(),
+            });
+
+            assert!(result.is_ok());
+            let result = result.unwrap();
+
+            // Check balance of recipient--should equal to the payment minus fee
+            let recipient_balance =
+                get_balance(Uuid::parse_str(&client_uuid_to).unwrap(), &conn).unwrap();
+            assert_eq!(
+                recipient_balance.balance_cents,
+                i64::from(result.payment_cents)
+            );
+            assert_eq!(recipient_balance.promo_cents, 0);
+
+            // Attempt to settle the payment again, it should fail
+            let result = beancounter.handle_settle_payment(&SettlePaymentRequest {
+                message_hash: message_hash.clone(),
+            });
+
+            assert!(result.is_err());
         }
 
         check_zero_sum(&db_pool);

@@ -31,6 +31,19 @@ table! {
     use diesel::sql_types::*;
     use crate::sql_types::*;
 
+    stripe_charges (id) {
+        id -> Int8,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+        client_id -> Uuid,
+        charge -> Json,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+    use crate::sql_types::*;
+
     transactions (id) {
         id -> Int8,
         created_at -> Timestamp,
@@ -40,4 +53,4 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(balances, payments, transactions,);
+allow_tables_to_appear_in_same_query!(balances, payments, stripe_charges, transactions,);

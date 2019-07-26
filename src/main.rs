@@ -1,25 +1,28 @@
 #[macro_use]
 extern crate diesel_derive_enum;
-extern crate env_logger;
-extern crate futures;
 #[macro_use]
 extern crate log;
-extern crate tokio;
-extern crate tower_hyper;
 #[macro_use]
 extern crate diesel;
-extern crate chrono;
 #[macro_use]
 extern crate failure;
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
 extern crate lazy_static;
+
 extern crate beancounter_grpc;
+extern crate chrono;
 extern crate data_encoding;
+extern crate dotenv;
+extern crate env_logger;
+extern crate futures;
 extern crate instrumented;
 extern crate regex;
+extern crate stripe;
+extern crate tokio;
 extern crate toml;
+extern crate tower_hyper;
 extern crate url;
 extern crate yansi;
 
@@ -28,6 +31,7 @@ mod models;
 mod schema;
 mod service;
 mod sql_types;
+mod stripe_client;
 
 use beancounter_grpc::proto::server;
 use futures::{Future, Stream};
