@@ -528,59 +528,74 @@ impl BeanCounter {
         request: &StripeChargeRequest,
     ) -> Result<StripeChargeResponse, RequestError> {
         use crate::models::*;
-        use crate::stripe_client::*;
-        use diesel::connection::TransactionManager;
+        use crate::stripe_client::{Stripe, StripeError};
         use diesel::prelude::*;
         use diesel::result::Error;
         use uuid::Uuid;
 
         let client_uuid = Uuid::parse_str(&request.client_id)?;
+        let mut charge_response: Option<StripeChargeResponse> = None;
 
         let conn = self.db_writer.get().unwrap();
-        let transaction_manager = conn.transaction_manager();
-        transaction_manager.begin_transaction(&conn)?;
+        let _db_result = conn.transaction::<_, Error, _>(|| {
+            let stripe_fee_amount_cents =
+                Stripe::calculate_stripe_fees(i64::from(request.amount_cents));
 
-        let stripe_fee_amount_cents =
-            Stripe::calculate_stripe_fees(i64::from(request.amount_cents));
+            // Add TX from cash account to client, minus fees
+            let (tx_credit, _tx_debit) = add_transaction(
+                Some(client_uuid),
+                None,
+                (i64::from(request.amount_cents) - stripe_fee_amount_cents) as i32,
+                &conn,
+            )?;
 
-        // Add TX from cash account to client
-        let (tx_credit, tx_debit) =
-            add_transaction(Some(client_uuid), None, request.amount_cents, &conn)?;
+            let stripe = Stripe::new();
 
-        let stripe = Stripe::new();
+            let charge_result = stripe.charge(
+                &request.token,
+                i64::from(request.amount_cents),
+                &request.client_id,
+                tx_credit.id,
+            );
 
-        let charge_result = stripe.charge(
-            &request.token,
-            i64::from(request.amount_cents),
-            &request.client_id,
-            tx_credit.id,
-        );
-
-        let result = match charge_result {
-            Ok(charge) => {
-                let balance = update_and_return_balance(client_uuid, &conn)?;
-                Ok(StripeChargeResponse {
-                    result: stripe_charge_response::Result::Success as i32,
-                    api_response: serde_json::to_string(&charge).unwrap(),
-                    balance: Some(balance.into()),
-                })
+            match charge_result {
+                Ok(charge) => {
+                    let balance = update_and_return_balance(client_uuid, &conn)?;
+                    charge_response = Some(StripeChargeResponse {
+                        result: stripe_charge_response::Result::Success as i32,
+                        api_response: serde_json::to_string(&charge).unwrap(),
+                        message: "".into(),
+                        balance: Some(balance.into()),
+                    });
+                    Ok(())
+                }
+                Err(StripeError::RequestError {
+                    err: _,
+                    request_error,
+                }) => {
+                    charge_response = Some(StripeChargeResponse {
+                        result: stripe_charge_response::Result::Failure as i32,
+                        api_response: serde_json::to_string(&request_error).unwrap(),
+                        message: "".into(),
+                        balance: None,
+                    });
+                    Err(Error::RollbackTransaction)
+                }
+                Err(err) => {
+                    charge_response = Some(StripeChargeResponse {
+                        result: stripe_charge_response::Result::Failure as i32,
+                        api_response: "".into(),
+                        message: err.to_string(),
+                        balance: None,
+                    });
+                    Err(Error::RollbackTransaction)
+                }
             }
-            Err(StripeError::RequestError { err, request_error }) => Ok(StripeChargeResponse {
-                result: stripe_charge_response::Result::Failure as i32,
-                api_response: serde_json::to_string(&request_error).unwrap(),
-                balance: None,
-            }),
-            Err(err) => Err(err.into()),
-        };
-        match result {
-            Ok(value) => {
-                transaction_manager.commit_transaction(&conn)?;
-                Ok(value)
-            }
-            Err(err) => {
-                transaction_manager.rollback_transaction(&conn)?;
-                Err(err)
-            }
+        });
+
+        match charge_response {
+            Some(response) => Ok(response),
+            None => Err(RequestError::BadArguments),
         }
     }
 }

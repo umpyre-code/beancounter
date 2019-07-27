@@ -118,7 +118,8 @@ message StripeChargeResponse {
   }
   Result result = 1;
   string api_response = 2;
-  Balance balance = 3;
+  string message = 3;
+  Balance balance = 4;
 }
 
 message HealthCheckRequest { string service = 1; }
