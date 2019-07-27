@@ -1,17 +1,18 @@
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate failure;
+
+extern crate beancounter_grpc;
 extern crate env_logger;
 extern crate futures;
 extern crate http;
 extern crate hyper;
-#[macro_use]
-extern crate log;
-extern crate beancounter_grpc;
 extern crate tokio;
 extern crate tower_hyper;
 extern crate tower_request_modifier;
 extern crate tower_service;
 extern crate tower_util;
-#[macro_use]
-extern crate failure;
 
 use beancounter_grpc::proto;
 use beancounter_grpc::tower_grpc::Request;

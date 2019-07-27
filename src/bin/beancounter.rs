@@ -1,64 +1,18 @@
 #[macro_use]
-extern crate diesel_derive_enum;
-#[macro_use]
 extern crate log;
-#[macro_use]
-extern crate diesel;
-#[macro_use]
-extern crate failure;
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate lazy_static;
 
+extern crate beancounter;
 extern crate beancounter_grpc;
-extern crate chrono;
-extern crate data_encoding;
-extern crate dotenv;
-extern crate env_logger;
-extern crate futures;
-extern crate instrumented;
-extern crate regex;
-extern crate stripe;
 extern crate tokio;
-extern crate toml;
 extern crate tower_hyper;
-extern crate url;
-extern crate yansi;
 
-mod config;
-mod models;
-mod schema;
-mod service;
-mod sql_types;
-mod stripe_client;
-
+use beancounter::config;
+use beancounter::database::get_db_pool;
+use beancounter::service;
 use beancounter_grpc::proto::server;
 use futures::{Future, Stream};
 use tokio::net::TcpListener;
 use tower_hyper::server::{Http, Server};
-
-fn get_db_pool(
-    database: &config::Database,
-) -> diesel::r2d2::Pool<diesel::r2d2::ConnectionManager<diesel::pg::PgConnection>> {
-    use diesel::pg::PgConnection;
-    use diesel::r2d2::{ConnectionManager, Pool};
-
-    let manager = ConnectionManager::<PgConnection>::new(format!(
-        "postgres://{}:{}@{}:{}/{}",
-        database.username, database.password, database.host, database.port, database.name,
-    ));
-
-    let db_pool = Pool::builder()
-        .max_size(database.connection_pool_size)
-        .build(manager)
-        .expect("Unable to create DB connection pool");
-
-    let conn = db_pool.get();
-    assert!(conn.is_ok());
-
-    db_pool
-}
 
 pub fn main() {
     use std::env;

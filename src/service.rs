@@ -10,12 +10,6 @@ use crate::models;
 use crate::schema;
 use crate::stripe_client;
 
-fn make_intcounter(name: &str, description: &str) -> prometheus::IntCounter {
-    let counter = prometheus::IntCounter::new(name, description).unwrap();
-    register(Box::new(counter.clone())).unwrap();
-    counter
-}
-
 // This amount is calculated by subtracting Stripe's maximum fee of 2.9% + 30c
 // from their charge maximum, which is $999,999.99 according to
 // https://stripe.com/docs/currencies#minimum-and-maximum-charge-amounts.
@@ -229,7 +223,7 @@ fn update_and_return_balance(
 }
 
 #[instrument(INFO)]
-fn add_transaction(
+pub fn add_transaction(
     client_id_credit: Option<uuid::Uuid>,
     client_id_debit: Option<uuid::Uuid>,
     amount_cents: i32,
@@ -527,7 +521,6 @@ impl BeanCounter {
         &self,
         request: &StripeChargeRequest,
     ) -> Result<StripeChargeResponse, RequestError> {
-        use crate::models::*;
         use crate::stripe_client::{Stripe, StripeError};
         use diesel::prelude::*;
         use diesel::result::Error;
