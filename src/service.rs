@@ -20,9 +20,9 @@ fn make_intcounter(name: &str, description: &str) -> prometheus::IntCounter {
 // from their charge maximum, which is $999,999.99 according to
 // https://stripe.com/docs/currencies#minimum-and-maximum-charge-amounts.
 // Thus, it's calculated like so (w/ Python):
-//   >>> (99999999 - 30) / 1.029
-//   97181699.70845482
-static MAX_PAYMENT_AMOUNT: i32 = 97_181_699;
+//   >>> 99999999 - (99999999 * 0.029 + 30)
+//   97099969.0292
+static MAX_PAYMENT_AMOUNT: i32 = 97_099_969;
 
 lazy_static! {
     static ref PAYMENT_ADDED: prometheus::HistogramVec = {
@@ -569,10 +569,7 @@ impl BeanCounter {
                     });
                     Ok(())
                 }
-                Err(StripeError::RequestError {
-                    err: _,
-                    request_error,
-                }) => {
+                Err(StripeError::RequestError { request_error, .. }) => {
                     charge_response = Some(StripeChargeResponse {
                         result: stripe_charge_response::Result::Failure as i32,
                         api_response: serde_json::to_string(&request_error).unwrap(),
@@ -1182,6 +1179,79 @@ mod tests {
 
             assert!(result.is_err());
         }
+
+        check_zero_sum(&db_pool);
+    }
+
+    #[test]
+    fn test_stripe_charge() {
+        let _lock = LOCK.lock().unwrap();
+
+        let (db_pool,) = get_pools();
+
+        empty_tables(&db_pool);
+
+        let beancounter = BeanCounter::new(db_pool.clone(), db_pool.clone());
+
+        let client_id_uuid = Uuid::new_v4();
+        let token = r#"
+        {
+            "id": "tok_visa",
+            "object": "token",
+            "card": {
+                "id": "card_1EYyYcG27b2IeIO74TusmAci",
+                "object": "card",
+                "address_city": null,
+                "address_country": null,
+                "address_line1": null,
+                "address_line1_check": null,
+                "address_line2": null,
+                "address_state": null,
+                "address_zip": null,
+                "address_zip_check": null,
+                "brand": "Visa",
+                "country": "US",
+                "cvc_check": null,
+                "dynamic_last4": null,
+                "exp_month": 8,
+                "exp_year": 2020,
+                "fingerprint": "9vruG6eJZVIM6012",
+                "funding": "credit",
+                "last4": "4242",
+                "metadata": {},
+                "name": null,
+                "tokenization_method": null
+            },
+            "client_ip": null,
+            "created": 1557594022,
+            "livemode": false,
+            "type": "card",
+            "used": false
+        }"#;
+
+        let charge_result = beancounter.handle_stripe_charge(&StripeChargeRequest {
+            client_id: client_id_uuid.to_simple().to_string(),
+            amount_cents: 1000,
+            token: token.to_string(),
+        });
+
+        assert!(charge_result.is_ok());
+        let charge = charge_result.unwrap();
+
+        assert_eq!(charge.balance.as_ref().unwrap().balance_cents, 941);
+        assert_eq!(charge.balance.as_ref().unwrap().promo_cents, 0);
+
+        let charge_result = beancounter.handle_stripe_charge(&StripeChargeRequest {
+            client_id: client_id_uuid.to_simple().to_string(),
+            amount_cents: 10000,
+            token: token.to_string(),
+        });
+
+        assert!(charge_result.is_ok());
+        let charge = charge_result.unwrap();
+
+        assert_eq!(charge.balance.as_ref().unwrap().balance_cents, 10621);
+        assert_eq!(charge.balance.as_ref().unwrap().promo_cents, 0);
 
         check_zero_sum(&db_pool);
     }

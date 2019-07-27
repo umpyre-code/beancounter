@@ -148,7 +148,7 @@ impl Stripe {
         let mut params = stripe::CreateCharge::new();
 
         params.amount = Some(amount);
-        params.source = Some(stripe::PaymentSourceParams::Token(token.id));
+        params.source = Some(stripe::ChargeSourceParams::Token(token.id));
         params.currency = Some(stripe::Currency::USD);
         params.capture = Some(true);
 
@@ -203,7 +203,7 @@ mod tests {
             "type": "card",
             "used": false
         }"#;
-        stripe.charge(&token, 1000, "client_id").unwrap();
+        stripe.charge(&token, 1000, "client_id", 100).unwrap();
     }
 
     #[test]
