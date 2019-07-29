@@ -54,9 +54,4 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(
-    balances,
-    payments,
-    stripe_charges,
-    transactions,
-);
+allow_tables_to_appear_in_same_query!(balances, payments, stripe_charges, transactions,);

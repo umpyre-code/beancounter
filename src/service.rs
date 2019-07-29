@@ -256,31 +256,6 @@ pub fn add_transaction(
     Ok((tx_credit, tx_debit))
 }
 
-fn get_balance(
-    client_uuid: uuid::Uuid,
-    conn: &diesel::r2d2::PooledConnection<diesel::r2d2::ConnectionManager<diesel::PgConnection>>,
-) -> Result<models::Balance, diesel::result::Error> {
-    use crate::models::*;
-    use crate::schema::balances::columns::*;
-    use crate::schema::balances::table as balances;
-    use diesel::insert_into;
-    use diesel::prelude::*;
-
-    let result = balances.filter(client_id.eq(client_uuid)).first(conn);
-
-    match result {
-        // If the balance record exists, return that
-        Ok(result) => Ok(result),
-        // If there's no record yet, create a new zeroed out balance record.
-        Err(diesel::NotFound) => Ok(insert_into(balances)
-            .values(&NewZeroBalance {
-                client_id: client_uuid,
-            })
-            .get_result(conn)?),
-        Err(err) => Err(err),
-    }
-}
-
 impl BeanCounter {
     pub fn new(
         db_reader: diesel::r2d2::Pool<diesel::r2d2::ConnectionManager<diesel::pg::PgConnection>>,
@@ -304,8 +279,7 @@ impl BeanCounter {
 
         let client_uuid = Uuid::parse_str(&request.client_id)?;
 
-        let conn = self.db_reader.get().unwrap();
-        let balance = conn.transaction::<Balance, Error, _>(|| get_balance(client_uuid, &conn))?;
+        let balance = self.get_balance(client_uuid)?;
 
         Ok(GetBalanceResponse {
             balance: Some(beancounter_grpc::proto::Balance {
@@ -314,6 +288,38 @@ impl BeanCounter {
                 promo_cents: balance.promo_cents,
             }),
         })
+    }
+
+    #[instrument(INFO)]
+    fn get_balance(
+        &self,
+        client_uuid: uuid::Uuid,
+    ) -> Result<models::Balance, diesel::result::Error> {
+        use crate::models::*;
+        use crate::schema::balances::columns::*;
+        use crate::schema::balances::table as balances;
+        use diesel::insert_into;
+        use diesel::prelude::*;
+
+        let reader_conn = self.db_reader.get().unwrap();
+        let result = balances
+            .filter(client_id.eq(client_uuid))
+            .first(&reader_conn);
+
+        match result {
+            // If the balance record exists, return that
+            Ok(result) => Ok(result),
+            // If there's no record yet, create a new zeroed out balance record.
+            Err(diesel::NotFound) => {
+                let writer_conn = self.db_reader.get().unwrap();
+                Ok(insert_into(balances)
+                    .values(&NewZeroBalance {
+                        client_id: client_uuid,
+                    })
+                    .get_result(&writer_conn)?)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     #[instrument(INFO)]
@@ -412,7 +418,7 @@ impl BeanCounter {
 
         let conn = self.db_writer.get().unwrap();
         // Check the sender balance, make sure it's sufficient.
-        let balance = get_balance(client_uuid_from, &conn)?;
+        let balance = self.get_balance(client_uuid_from)?;
         if balance.balance_cents + balance.promo_cents < i64::from(total_amount) {
             return Ok(AddPaymentResponse {
                 result: add_payment_response::Result::InsufficientBalance as i32,
@@ -1029,8 +1035,9 @@ mod tests {
             let conn = db_pool.get().unwrap();
 
             // Check balance of sender
-            let sender_balance =
-                get_balance(Uuid::parse_str(&client_uuid_from).unwrap(), &conn).unwrap();
+            let sender_balance = beancounter
+                .get_balance(Uuid::parse_str(&client_uuid_from).unwrap())
+                .unwrap();
             assert_eq!(
                 sender_balance.balance_cents,
                 i64::from(payment_amount - (payment_cents + fee_cents))
@@ -1038,8 +1045,9 @@ mod tests {
             assert_eq!(sender_balance.promo_cents, 0);
 
             // Check balance of recipient--should be zero
-            let recipient_balance =
-                get_balance(Uuid::parse_str(&client_uuid_to).unwrap(), &conn).unwrap();
+            let recipient_balance = beancounter
+                .get_balance(Uuid::parse_str(&client_uuid_to).unwrap())
+                .unwrap();
             assert_eq!(recipient_balance.balance_cents, 0);
             assert_eq!(recipient_balance.promo_cents, 0);
         }
@@ -1134,8 +1142,9 @@ mod tests {
             let conn = db_pool.get().unwrap();
 
             // Check balance of sender
-            let sender_balance =
-                get_balance(Uuid::parse_str(&client_uuid_from).unwrap(), &conn).unwrap();
+            let sender_balance = beancounter
+                .get_balance(Uuid::parse_str(&client_uuid_from).unwrap())
+                .unwrap();
             assert_eq!(
                 sender_balance.balance_cents,
                 i64::from(payment_amount - (payment_cents + fee_cents))
@@ -1143,8 +1152,9 @@ mod tests {
             assert_eq!(sender_balance.promo_cents, 0);
 
             // Check balance of recipient--should be zero
-            let recipient_balance =
-                get_balance(Uuid::parse_str(&client_uuid_to).unwrap(), &conn).unwrap();
+            let recipient_balance = beancounter
+                .get_balance(Uuid::parse_str(&client_uuid_to).unwrap())
+                .unwrap();
             assert_eq!(recipient_balance.balance_cents, 0);
             assert_eq!(recipient_balance.promo_cents, 0);
 
@@ -1157,8 +1167,9 @@ mod tests {
             let result = result.unwrap();
 
             // Check balance of recipient--should equal to the payment minus fee
-            let recipient_balance =
-                get_balance(Uuid::parse_str(&client_uuid_to).unwrap(), &conn).unwrap();
+            let recipient_balance = beancounter
+                .get_balance(Uuid::parse_str(&client_uuid_to).unwrap())
+                .unwrap();
             assert_eq!(
                 recipient_balance.balance_cents,
                 i64::from(result.payment_cents)
