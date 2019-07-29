@@ -272,9 +272,6 @@ impl BeanCounter {
         &self,
         request: &GetBalanceRequest,
     ) -> Result<GetBalanceResponse, RequestError> {
-        use crate::models::*;
-        use diesel::prelude::*;
-        use diesel::result::Error;
         use uuid::Uuid;
 
         let client_uuid = Uuid::parse_str(&request.client_id)?;
