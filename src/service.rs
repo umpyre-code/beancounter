@@ -311,7 +311,7 @@ impl BeanCounter {
             Ok(result) => Ok(result),
             // If there's no record yet, create a new zeroed out balance record.
             Err(diesel::NotFound) => {
-                let writer_conn = self.db_reader.get().unwrap();
+                let writer_conn = self.db_writer.get().unwrap();
                 Ok(insert_into(balances)
                     .values(&NewZeroBalance {
                         client_id: client_uuid,
