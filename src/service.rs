@@ -704,14 +704,20 @@ mod tests {
         static ref LOCK: Mutex<i32> = Mutex::new(0);
     }
 
-    fn get_pools(
-    ) -> (diesel::r2d2::Pool<diesel::r2d2::ConnectionManager<diesel::pg::PgConnection>>,) {
+    fn get_pools() -> (
+        diesel::r2d2::Pool<diesel::r2d2::ConnectionManager<diesel::pg::PgConnection>>,
+        diesel::r2d2::Pool<diesel::r2d2::ConnectionManager<diesel::pg::PgConnection>>,
+    ) {
         let pg_manager = ConnectionManager::<PgConnection>::new(
             "postgres://postgres:password@127.0.0.1:5432/beancounter",
         );
-        let db_pool = Pool::builder().build(pg_manager).unwrap();
+        let db_pool_reader = Pool::builder().build(pg_manager).unwrap();
+        let pg_manager = ConnectionManager::<PgConnection>::new(
+            "postgres://postgres:password@127.0.0.1:5432/beancounter",
+        );
+        let db_pool_writer = Pool::builder().build(pg_manager).unwrap();
 
-        (db_pool,)
+        (db_pool_reader, db_pool_writer)
     }
 
     fn empty_tables(
@@ -753,11 +759,11 @@ mod tests {
 
         let _lock = LOCK.lock().unwrap();
 
-        let (db_pool,) = get_pools();
+        let (db_pool_reader, db_pool_writer) = get_pools();
 
-        empty_tables(&db_pool);
+        empty_tables(&db_pool_writer);
 
-        let beancounter = BeanCounter::new(db_pool.clone(), db_pool.clone());
+        let beancounter = BeanCounter::new(db_pool_reader.clone(), db_pool_writer.clone());
 
         // generate 100 UUIDs
         let mut uuids = Vec::<String>::new();
@@ -778,12 +784,12 @@ mod tests {
             assert_eq!(balance.promo_cents, 0);
         }
 
-        let conn = db_pool.get().unwrap();
+        let conn = db_pool_reader.get().unwrap();
 
         let tx_count = transactions.select(count(id)).first(&conn);
         assert_eq!(Ok(200), tx_count);
 
-        check_zero_sum(&db_pool);
+        check_zero_sum(&db_pool_reader);
 
         for uuid in uuids.iter() {
             let balance_result = beancounter.handle_get_balance(&GetBalanceRequest {
@@ -840,11 +846,11 @@ mod tests {
 
         let _lock = LOCK.lock().unwrap();
 
-        let (db_pool,) = get_pools();
+        let (db_pool_reader, db_pool_writer) = get_pools();
 
-        empty_tables(&db_pool);
+        empty_tables(&db_pool_writer);
 
-        let beancounter = BeanCounter::new(db_pool.clone(), db_pool.clone());
+        let beancounter = BeanCounter::new(db_pool_reader.clone(), db_pool_writer.clone());
 
         // A fresh new client_id returns a zero balance.
         let balance_result = beancounter.handle_get_balance(&GetBalanceRequest {
@@ -876,7 +882,7 @@ mod tests {
         let balance = balance_result.unwrap().balance.unwrap();
         assert_eq!(balance.balance_cents, i64::from(amount));
         assert_eq!(balance.promo_cents, 0);
-        check_zero_sum(&db_pool);
+        check_zero_sum(&db_pool_reader);
     }
 
     #[test]
@@ -886,11 +892,11 @@ mod tests {
 
         let _lock = LOCK.lock().unwrap();
 
-        let (db_pool,) = get_pools();
+        let (db_pool_reader, db_pool_writer) = get_pools();
 
-        empty_tables(&db_pool);
+        empty_tables(&db_pool_writer);
 
-        let beancounter = BeanCounter::new(db_pool.clone(), db_pool.clone());
+        let beancounter = BeanCounter::new(db_pool_reader.clone(), db_pool_writer.clone());
 
         let uuid = Uuid::new_v4().to_simple().to_string();
 
@@ -932,7 +938,7 @@ mod tests {
             transaction::Type::Credit as i32
         );
 
-        let conn = db_pool.get().unwrap();
+        let conn = db_pool_reader.get().unwrap();
 
         // Check there's a corresponding debit against the umpyre cash account
         let result: Vec<models::Transaction> = schema::transactions::table
@@ -945,7 +951,7 @@ mod tests {
         assert_eq!(result[0].amount_cents, -amount);
         assert_eq!(result[0].tx_type, TransactionType::Debit);
 
-        check_zero_sum(&db_pool);
+        check_zero_sum(&db_pool_reader);
     }
 
     #[test]
@@ -954,11 +960,11 @@ mod tests {
 
         let _lock = LOCK.lock().unwrap();
 
-        let (db_pool,) = get_pools();
+        let (db_pool_reader, db_pool_writer) = get_pools();
 
-        empty_tables(&db_pool);
+        empty_tables(&db_pool_writer);
 
-        let beancounter = BeanCounter::new(db_pool.clone(), db_pool.clone());
+        let beancounter = BeanCounter::new(db_pool_reader.clone(), db_pool_writer.clone());
 
         for payment_amount in 0..50 {
             let client_uuid_from = Uuid::new_v4().to_simple().to_string();
@@ -1031,8 +1037,6 @@ mod tests {
             assert_eq!(result.result, add_payment_response::Result::Success as i32);
             assert_eq!(result.payment_cents, payment_cents);
             assert_eq!(result.fee_cents, fee_cents);
-
-            let conn = db_pool.get().unwrap();
 
             // Check balance of sender
             let sender_balance = beancounter
@@ -1052,7 +1056,7 @@ mod tests {
             assert_eq!(recipient_balance.promo_cents, 0);
         }
 
-        check_zero_sum(&db_pool);
+        check_zero_sum(&db_pool_reader);
     }
 
     #[test]
@@ -1061,11 +1065,11 @@ mod tests {
 
         let _lock = LOCK.lock().unwrap();
 
-        let (db_pool,) = get_pools();
+        let (db_pool_reader, db_pool_writer) = get_pools();
 
-        empty_tables(&db_pool);
+        empty_tables(&db_pool_writer);
 
-        let beancounter = BeanCounter::new(db_pool.clone(), db_pool.clone());
+        let beancounter = BeanCounter::new(db_pool_reader.clone(), db_pool_writer.clone());
 
         for payment_amount in 0..50 {
             let client_uuid_from = Uuid::new_v4().to_simple().to_string();
@@ -1138,8 +1142,6 @@ mod tests {
             assert_eq!(result.result, add_payment_response::Result::Success as i32);
             assert_eq!(result.payment_cents, payment_cents);
             assert_eq!(result.fee_cents, fee_cents);
-
-            let conn = db_pool.get().unwrap();
 
             // Check balance of sender
             let sender_balance = beancounter
@@ -1184,18 +1186,18 @@ mod tests {
             assert!(result.is_err());
         }
 
-        check_zero_sum(&db_pool);
+        check_zero_sum(&db_pool_reader);
     }
 
     #[test]
     fn test_stripe_charge() {
         let _lock = LOCK.lock().unwrap();
 
-        let (db_pool,) = get_pools();
+        let (db_pool_reader, db_pool_writer) = get_pools();
 
-        empty_tables(&db_pool);
+        empty_tables(&db_pool_writer);
 
-        let beancounter = BeanCounter::new(db_pool.clone(), db_pool.clone());
+        let beancounter = BeanCounter::new(db_pool_reader.clone(), db_pool_writer.clone());
 
         let client_id_uuid = Uuid::new_v4();
         let token = r#"
@@ -1257,6 +1259,6 @@ mod tests {
         assert_eq!(charge.balance.as_ref().unwrap().balance_cents, 10621);
         assert_eq!(charge.balance.as_ref().unwrap().promo_cents, 0);
 
-        check_zero_sum(&db_pool);
+        check_zero_sum(&db_pool_reader);
     }
 }
