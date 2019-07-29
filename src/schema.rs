@@ -36,6 +36,7 @@ table! {
         created_at -> Timestamp,
         updated_at -> Timestamp,
         client_id -> Uuid,
+        token -> Json,
         charge -> Json,
     }
 }
@@ -53,4 +54,9 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(balances, payments, stripe_charges, transactions,);
+allow_tables_to_appear_in_same_query!(
+    balances,
+    payments,
+    stripe_charges,
+    transactions,
+);
