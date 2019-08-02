@@ -165,10 +165,12 @@ impl Stripe {
         let mut exec = tokio::executor::DefaultExecutor::current();
 
         let (tx, rx) = futures::sync::oneshot::channel();
-        let farted = stripe::Charge::create(&self.client, params)
-            .then(move |r| tx.send(r))
-            .map_err(|err| error!("failure: {:?}", err));
-        exec.spawn(Box::new(farted)).unwrap();
+        exec.spawn(Box::new(
+            stripe::Charge::create(&self.client, params)
+                .then(move |r| tx.send(r))
+                .map_err(|err| error!("failure: {:?}", err)),
+        ))
+        .unwrap();
         rx.wait().unwrap().map_err(StripeError::from)
     }
 }
