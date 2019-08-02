@@ -127,7 +127,9 @@ impl Stripe {
         dotenv().ok();
 
         Self {
-            client: stripe::r#async::Client::new(var("STRIPE_API_SECRET").unwrap()),
+            client: stripe::r#async::Client::new(
+                var("STRIPE_API_SECRET").expect("Missing Stripe API secret key"),
+            ),
         }
     }
 
@@ -144,7 +146,8 @@ impl Stripe {
         client_id: &str,
         tx_id: i64,
     ) -> Result<stripe::Charge, StripeError> {
-        use crate::futures::Future;
+        use futures::Future;
+        use tokio::executor::Executor;
 
         let token: stripe::Token = serde_json::from_str(token)?;
         let mut params = stripe::CreateCharge::new();
@@ -159,9 +162,14 @@ impl Stripe {
         metadata.insert("tx_id".into(), format!("{}", tx_id));
         params.metadata = Some(metadata);
 
-        stripe::Charge::create(&self.client, params)
-            .map_err(StripeError::from)
-            .wait()
+        let mut exec = tokio::executor::DefaultExecutor::current();
+
+        let (tx, rx) = futures::sync::oneshot::channel();
+        let farted = stripe::Charge::create(&self.client, params)
+            .then(move |r| tx.send(r))
+            .map_err(|err| error!("failure: {:?}", err));
+        exec.spawn(Box::new(farted)).unwrap();
+        rx.wait().unwrap().map_err(StripeError::from)
     }
 }
 
@@ -169,45 +177,50 @@ impl Stripe {
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
+    use futures::future;
 
     #[test]
     fn test_stripe_charge() {
-        let stripe = Stripe::new();
-        let token = r#"
-        {
-            "id": "tok_visa",
-            "object": "token",
-            "card": {
-                "id": "card_1EYyYcG27b2IeIO74TusmAci",
-                "object": "card",
-                "address_city": null,
-                "address_country": null,
-                "address_line1": null,
-                "address_line1_check": null,
-                "address_line2": null,
-                "address_state": null,
-                "address_zip": null,
-                "address_zip_check": null,
-                "brand": "Visa",
-                "country": "US",
-                "cvc_check": null,
-                "dynamic_last4": null,
-                "exp_month": 8,
-                "exp_year": 2020,
-                "fingerprint": "9vruG6eJZVIM6012",
-                "funding": "credit",
-                "last4": "4242",
-                "metadata": {},
-                "name": null,
-                "tokenization_method": null
-            },
-            "client_ip": null,
-            "created": 1557594022,
-            "livemode": false,
-            "type": "card",
-            "used": false
-        }"#;
-        stripe.charge(&token, 1000, "client_id", 100).unwrap();
+        tokio::run(future::lazy(|| {
+            let stripe = Stripe::new();
+            let token = r#"
+            {
+                "id": "tok_visa",
+                "object": "token",
+                "card": {
+                    "id": "card_1EYyYcG27b2IeIO74TusmAci",
+                    "object": "card",
+                    "address_city": null,
+                    "address_country": null,
+                    "address_line1": null,
+                    "address_line1_check": null,
+                    "address_line2": null,
+                    "address_state": null,
+                    "address_zip": null,
+                    "address_zip_check": null,
+                    "brand": "Visa",
+                    "country": "US",
+                    "cvc_check": null,
+                    "dynamic_last4": null,
+                    "exp_month": 8,
+                    "exp_year": 2020,
+                    "fingerprint": "9vruG6eJZVIM6012",
+                    "funding": "credit",
+                    "last4": "4242",
+                    "metadata": {},
+                    "name": null,
+                    "tokenization_method": null
+                },
+                "client_ip": null,
+                "created": 1557594022,
+                "livemode": false,
+                "type": "card",
+                "used": false
+            }"#;
+            stripe.charge(&token, 1000, "client_id", 100).unwrap();
+
+            future::ok(())
+        }));
     }
 
     #[test]

@@ -5,9 +5,11 @@ extern crate diesel;
 #[macro_use]
 extern crate failure;
 #[macro_use]
-extern crate serde_derive;
+extern crate log;
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate serde_derive;
 
 extern crate beancounter_grpc;
 extern crate chrono;

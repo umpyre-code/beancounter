@@ -694,6 +694,7 @@ mod tests {
     use diesel::pg::PgConnection;
     use diesel::prelude::*;
     use diesel::r2d2::{ConnectionManager, Pool};
+    use futures::future;
     use std::sync::Mutex;
     use uuid::Uuid;
 
@@ -1190,72 +1191,76 @@ mod tests {
     fn test_stripe_charge() {
         let _lock = LOCK.lock().unwrap();
 
-        let (db_pool_reader, db_pool_writer) = get_pools();
+        tokio::run(future::lazy(|| {
+            let (db_pool_reader, db_pool_writer) = get_pools();
 
-        empty_tables(&db_pool_writer);
+            empty_tables(&db_pool_writer);
 
-        let beancounter = BeanCounter::new(db_pool_reader.clone(), db_pool_writer.clone());
+            let beancounter = BeanCounter::new(db_pool_reader.clone(), db_pool_writer.clone());
 
-        let client_id_uuid = Uuid::new_v4();
-        let token = r#"
-        {
-            "id": "tok_visa",
-            "object": "token",
-            "card": {
-                "id": "card_1EYyYcG27b2IeIO74TusmAci",
-                "object": "card",
-                "address_city": null,
-                "address_country": null,
-                "address_line1": null,
-                "address_line1_check": null,
-                "address_line2": null,
-                "address_state": null,
-                "address_zip": null,
-                "address_zip_check": null,
-                "brand": "Visa",
-                "country": "US",
-                "cvc_check": null,
-                "dynamic_last4": null,
-                "exp_month": 8,
-                "exp_year": 2020,
-                "fingerprint": "9vruG6eJZVIM6012",
-                "funding": "credit",
-                "last4": "4242",
-                "metadata": {},
-                "name": null,
-                "tokenization_method": null
-            },
-            "client_ip": null,
-            "created": 1557594022,
-            "livemode": false,
-            "type": "card",
-            "used": false
-        }"#;
+            let client_id_uuid = Uuid::new_v4();
+            let token = r#"
+            {
+                "id": "tok_visa",
+                "object": "token",
+                "card": {
+                    "id": "card_1EYyYcG27b2IeIO74TusmAci",
+                    "object": "card",
+                    "address_city": null,
+                    "address_country": null,
+                    "address_line1": null,
+                    "address_line1_check": null,
+                    "address_line2": null,
+                    "address_state": null,
+                    "address_zip": null,
+                    "address_zip_check": null,
+                    "brand": "Visa",
+                    "country": "US",
+                    "cvc_check": null,
+                    "dynamic_last4": null,
+                    "exp_month": 8,
+                    "exp_year": 2020,
+                    "fingerprint": "9vruG6eJZVIM6012",
+                    "funding": "credit",
+                    "last4": "4242",
+                    "metadata": {},
+                    "name": null,
+                    "tokenization_method": null
+                },
+                "client_ip": null,
+                "created": 1557594022,
+                "livemode": false,
+                "type": "card",
+                "used": false
+            }"#;
 
-        let charge_result = beancounter.handle_stripe_charge(&StripeChargeRequest {
-            client_id: client_id_uuid.to_simple().to_string(),
-            amount_cents: 1000,
-            token: token.to_string(),
-        });
+            let charge_result = beancounter.handle_stripe_charge(&StripeChargeRequest {
+                client_id: client_id_uuid.to_simple().to_string(),
+                amount_cents: 1000,
+                token: token.to_string(),
+            });
 
-        assert!(charge_result.is_ok());
-        let charge = charge_result.unwrap();
+            assert!(charge_result.is_ok());
+            let charge = charge_result.unwrap();
 
-        assert_eq!(charge.balance.as_ref().unwrap().balance_cents, 941);
-        assert_eq!(charge.balance.as_ref().unwrap().promo_cents, 0);
+            assert_eq!(charge.balance.as_ref().unwrap().balance_cents, 941);
+            assert_eq!(charge.balance.as_ref().unwrap().promo_cents, 0);
 
-        let charge_result = beancounter.handle_stripe_charge(&StripeChargeRequest {
-            client_id: client_id_uuid.to_simple().to_string(),
-            amount_cents: 10000,
-            token: token.to_string(),
-        });
+            let charge_result = beancounter.handle_stripe_charge(&StripeChargeRequest {
+                client_id: client_id_uuid.to_simple().to_string(),
+                amount_cents: 10000,
+                token: token.to_string(),
+            });
 
-        assert!(charge_result.is_ok());
-        let charge = charge_result.unwrap();
+            assert!(charge_result.is_ok());
+            let charge = charge_result.unwrap();
 
-        assert_eq!(charge.balance.as_ref().unwrap().balance_cents, 10621);
-        assert_eq!(charge.balance.as_ref().unwrap().promo_cents, 0);
+            assert_eq!(charge.balance.as_ref().unwrap().balance_cents, 10621);
+            assert_eq!(charge.balance.as_ref().unwrap().promo_cents, 0);
 
-        check_zero_sum(&db_pool_reader);
+            check_zero_sum(&db_pool_reader);
+
+            future::ok(())
+        }));
     }
 }
