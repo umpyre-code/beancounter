@@ -556,14 +556,24 @@ impl BeanCounter {
 
             match charge_result {
                 Ok(charge) => {
-                    let balance = update_and_return_balance(client_uuid, &conn)?;
-                    charge_response = Some(StripeChargeResponse {
-                        result: stripe_charge_response::Result::Success as i32,
-                        api_response: serde_json::to_string(&charge).unwrap(),
-                        message: "".into(),
-                        balance: Some(balance.into()),
-                    });
-                    Ok(())
+                    if charge.status == "succeeded" {
+                        let balance = update_and_return_balance(client_uuid, &conn)?;
+                        charge_response = Some(StripeChargeResponse {
+                            result: stripe_charge_response::Result::Success as i32,
+                            api_response: serde_json::to_string(&charge).unwrap(),
+                            message: charge.status,
+                            balance: Some(balance.into()),
+                        });
+                        Ok(())
+                    } else {
+                        charge_response = Some(StripeChargeResponse {
+                            result: stripe_charge_response::Result::Failure as i32,
+                            api_response: serde_json::to_string(&charge).unwrap(),
+                            message: charge.status,
+                            balance: None,
+                        });
+                        Err(Error::RollbackTransaction)
+                    }
                 }
                 Err(StripeError::RequestError { request_error, .. }) => {
                     charge_response = Some(StripeChargeResponse {
