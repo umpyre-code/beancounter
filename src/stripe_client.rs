@@ -135,7 +135,7 @@ impl Stripe {
 
     pub fn calculate_stripe_fees(amount: i64) -> i64 {
         // Details on stripe fees: https://stripe.com/pricing#pricing-details
-        ((amount as f64) * 0.029).floor() as i64 + 30
+        ((amount as f64) * 0.029).round() as i64 + 30
     }
 
     #[instrument(INFO)]
@@ -231,5 +231,6 @@ mod tests {
             assert_eq!(Stripe::calculate_stripe_fees(1000 + i), 59);
             assert_eq!(Stripe::calculate_stripe_fees(10000 + i), 320);
         }
+        assert_eq!(Stripe::calculate_stripe_fees(2091), 91);
     }
 }
