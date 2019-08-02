@@ -6,20 +6,12 @@ edition = "2018"
 
 [dependencies]
 beancounter-grpc = { path = "lib" }
-dotenv = "0.14"
-stripe-rust = "0.10"
 bigdecimal = "0.1"
 chrono = { version = "0.4" }
 data-encoding = "2.1"
-diesel = { version = "1.4", features = [
-  "chrono",
-  "numeric",
-  "postgres",
-  "r2d2",
-  "serde_json",
-  "uuidv07",
-] }
+diesel = { version = "1.4", features = [ "chrono", "numeric", "postgres", "r2d2", "serde_json", "uuidv07"] }
 diesel-derive-enum = { version = "0.4", features = ["postgres"] }
+dotenv = "0.14"
 env_logger = { version = "0.6", default-features = false }
 failure = "0.1"
 futures = "0.1"
@@ -32,6 +24,7 @@ regex = "1"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
+stripe-rust = { version = "0.10", features = ["async"] }
 tokio = "0.1"
 toml = "0.5"
 tower-hyper = "0.1"

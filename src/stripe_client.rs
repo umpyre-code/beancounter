@@ -117,7 +117,7 @@ impl From<stripe::Error> for StripeError {
 }
 
 pub struct Stripe {
-    client: stripe::Client,
+    client: stripe::r#async::Client,
 }
 
 impl Stripe {
@@ -127,7 +127,7 @@ impl Stripe {
         dotenv().ok();
 
         Self {
-            client: stripe::Client::new(var("STRIPE_API_SECRET").unwrap()),
+            client: stripe::r#async::Client::new(var("STRIPE_API_SECRET").unwrap()),
         }
     }
 
@@ -144,6 +144,8 @@ impl Stripe {
         client_id: &str,
         tx_id: i64,
     ) -> Result<stripe::Charge, StripeError> {
+        use crate::futures::Future;
+
         let token: stripe::Token = serde_json::from_str(token)?;
         let mut params = stripe::CreateCharge::new();
 
@@ -157,7 +159,9 @@ impl Stripe {
         metadata.insert("tx_id".into(), format!("{}", tx_id));
         params.metadata = Some(metadata);
 
-        stripe::Charge::create(&self.client, params).map_err(StripeError::from)
+        stripe::Charge::create(&self.client, params)
+            .map_err(StripeError::from)
+            .wait()
     }
 }
 
