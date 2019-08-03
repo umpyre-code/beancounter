@@ -10,6 +10,13 @@ pub struct Config {
     pub service: Service,
     pub database: Databases,
     pub metrics: Metrics,
+    pub stripe: Stripe,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Stripe {
+    pub redirect_uri: String,
+    pub connect_client_id: String,
 }
 
 #[derive(Debug, Deserialize)]

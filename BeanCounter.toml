@@ -1,3 +1,7 @@
+[stripe]
+redirect_uri = "https://staging.umpyre.io/accounts/payouts"
+connect_client_id = "ca_FVZ7xsdnQsZChPyqzq4sDtwCMSoATpPz"
+
 [service]
 worker_threads = 10
 ca_cert_path = "test/UmpyreAuth.crt"

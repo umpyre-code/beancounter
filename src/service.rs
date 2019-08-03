@@ -83,6 +83,8 @@ enum RequestError {
     BadArguments,
     #[fail(display = "stripe error: {}", err)]
     StripeError { err: String },
+    #[fail(display = "insufficient balance")]
+    InsufficientBalance,
 }
 
 impl From<stripe_client::StripeError> for RequestError {
@@ -135,6 +137,37 @@ impl From<models::Balance> for beancounter_grpc::proto::Balance {
             balance_cents: balance.balance_cents,
             promo_cents: balance.promo_cents,
         }
+    }
+}
+
+impl From<models::StripeConnectAccount> for beancounter_grpc::proto::ConnectAccountPrefs {
+    fn from(account: models::StripeConnectAccount) -> Self {
+        Self {
+            enable_automatic_payouts: account.enable_automatic_payouts,
+            automatic_payout_threshold_cents: account.automatic_payout_threshold_cents,
+        }
+    }
+}
+
+fn from_account(
+    account: models::StripeConnectAccount,
+    stripe: &stripe_client::Stripe,
+) -> Result<beancounter_grpc::proto::ConnectAccountInfo, RequestError> {
+    use connect_account_info::Connect::*;
+
+    match account.stripe_user_id.as_ref() {
+        Some(stripe_user_id) => Ok(ConnectAccountInfo {
+            state: connect_account_info::State::Active as i32,
+            connect: Some(LoginLinkUrl(stripe.get_login_link(stripe_user_id)?.url)),
+            preferences: Some(account.into()),
+        }),
+        _ => Ok(ConnectAccountInfo {
+            state: connect_account_info::State::Inactive as i32,
+            connect: Some(OauthUrl(
+                stripe.get_oauth_url(account.oauth_state.to_simple().to_string()),
+            )),
+            preferences: Some(account.into()),
+        }),
     }
 }
 
@@ -320,6 +353,38 @@ impl BeanCounter {
     }
 
     #[instrument(INFO)]
+    fn get_connect_account(
+        &self,
+        client_uuid: uuid::Uuid,
+    ) -> Result<models::StripeConnectAccount, diesel::result::Error> {
+        use crate::models::*;
+        use crate::schema::stripe_connect_accounts::columns::*;
+        use crate::schema::stripe_connect_accounts::table as stripe_connect_accounts;
+        use diesel::insert_into;
+        use diesel::prelude::*;
+
+        let reader_conn = self.db_reader.get().unwrap();
+        let result = stripe_connect_accounts
+            .filter(client_id.eq(client_uuid))
+            .first(&reader_conn);
+
+        match result {
+            // If the balance record exists, return that
+            Ok(result) => Ok(result),
+            // If there's no record yet, create a new zeroed out balance record.
+            Err(diesel::NotFound) => {
+                let writer_conn = self.db_writer.get().unwrap();
+                Ok(insert_into(stripe_connect_accounts)
+                    .values(&NewStripeConnectAccount {
+                        client_id: client_uuid,
+                    })
+                    .get_result(&writer_conn)?)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    #[instrument(INFO)]
     fn handle_get_transactions(
         &self,
         request: &GetTransactionsRequest,
@@ -365,21 +430,12 @@ impl BeanCounter {
         let conn = self.db_writer.get().unwrap();
         let balance = conn.transaction::<Balance, Error, _>(|| {
             add_transaction(Some(client_uuid), None, request.amount_cents, &conn)?;
-
             Ok(update_and_return_balance(client_uuid, &conn)?)
         })?;
 
         Ok(AddCreditsResponse {
             balance: Some(balance.into()),
         })
-    }
-
-    #[instrument(INFO)]
-    fn handle_withdraw_credits(
-        &self,
-        request: &WithdrawCreditsRequest,
-    ) -> Result<WithdrawCreditsResponse, RequestError> {
-        Err(RequestError::BadArguments)
     }
 
     #[instrument(INFO)]
@@ -601,16 +657,194 @@ impl BeanCounter {
             None => Err(RequestError::BadArguments),
         }
     }
+
+    #[instrument(INFO)]
+    fn handle_connect_payout(
+        &self,
+        request: &ConnectPayoutRequest,
+    ) -> Result<ConnectPayoutResponse, RequestError> {
+        use crate::models::{
+            NewStripeConnectTransfer, StripeConnectAccount, StripeConnectTransfer,
+        };
+        use crate::schema::stripe_connect_accounts::table as stripe_connect_accounts;
+        use crate::schema::stripe_connect_transfers::table as stripe_connect_transfers;
+        use crate::stripe_client::Stripe;
+        use diesel::prelude::*;
+        use uuid::Uuid;
+
+        let client_uuid = Uuid::parse_str(&request.client_id)?;
+
+        // Check the oauth state matches what we're expecting first.
+        let conn = self.db_reader.get().unwrap();
+        let account: StripeConnectAccount = stripe_connect_accounts
+            .filter(crate::schema::stripe_connect_accounts::columns::client_id.eq(client_uuid))
+            .first(&conn)?;
+
+        let conn = self.db_writer.get().unwrap();
+        let balance = conn.transaction::<models::Balance, RequestError, _>(|| {
+            // Update & fetch balance
+            let balance = update_and_return_balance(client_uuid, &conn)?;
+
+            if balance.balance_cents < i64::from(request.amount_cents) {
+                return Err(RequestError::InsufficientBalance);
+            }
+
+            let stripe = Stripe::new();
+            let transfer = stripe.transfer(
+                request.amount_cents,
+                account.stripe_user_id.as_ref().unwrap(),
+            )?;
+
+            let _transfer: StripeConnectTransfer = diesel::insert_into(stripe_connect_transfers)
+                .values(NewStripeConnectTransfer {
+                    client_id: client_uuid,
+                    stripe_user_id: account.stripe_user_id.unwrap(),
+                    connect_transfer: serde_json::to_value(transfer).unwrap(),
+                    amount_cents: request.amount_cents,
+                })
+                .get_result(&conn)?;
+
+            // Add TX from client account to cash account
+            add_transaction(None, Some(client_uuid), request.amount_cents, &conn)?;
+
+            let balance = update_and_return_balance(client_uuid, &conn)?;
+
+            Ok(balance)
+        });
+
+        match balance {
+            Ok(balance) => Ok(ConnectPayoutResponse {
+                client_id: client_uuid.to_simple().to_string(),
+                result: connect_payout_response::Result::Success as i32,
+                balance: Some(balance.into()),
+            }),
+            Err(RequestError::InsufficientBalance) => Ok(ConnectPayoutResponse {
+                client_id: client_uuid.to_simple().to_string(),
+                result: connect_payout_response::Result::InsufficientBalance as i32,
+                balance: None,
+            }),
+            Err(err) => Err(err),
+        }
+    }
+
+    #[instrument(INFO)]
+    fn handle_complete_connect_oauth(
+        &self,
+        request: &CompleteConnectOauthRequest,
+    ) -> Result<CompleteConnectOauthResponse, RequestError> {
+        use crate::models::{StripeConnectAccount, UpdateStripeConnectAccount};
+        use crate::schema::stripe_connect_accounts::columns::*;
+        use crate::schema::stripe_connect_accounts::table as stripe_connect_accounts;
+        use crate::stripe_client::Stripe;
+        use diesel::prelude::*;
+        use diesel::result::Error;
+        use uuid::Uuid;
+
+        let client_uuid = Uuid::parse_str(&request.client_id)?;
+        let oauth_state_uuid = Uuid::parse_str(&request.oauth_state)?;
+        let stripe = Stripe::new();
+
+        // Check the oauth state matches what we're expecting first.
+        let conn = self.db_reader.get().unwrap();
+        let _account: StripeConnectAccount = stripe_connect_accounts
+            .filter(
+                client_id
+                    .eq(client_uuid)
+                    .and(oauth_state.eq(oauth_state_uuid)),
+            )
+            .first(&conn)?;
+
+        let credentials = stripe.post_connect_code(&request.authorization_code)?;
+        let user_id = credentials.stripe_user_id.clone();
+        let account = stripe.get_account(&user_id)?;
+
+        let conn = self.db_writer.get().unwrap();
+        let updated_account = conn.transaction::<StripeConnectAccount, Error, _>(|| {
+            diesel::update(stripe_connect_accounts.filter(client_id.eq(client_uuid)))
+                .set(UpdateStripeConnectAccount {
+                    stripe_user_id: Some(user_id),
+                    connect_credentials: serde_json::to_value(&credentials).ok(),
+                    connect_account: serde_json::to_value(&account).ok(),
+                })
+                .get_result(&conn)
+        })?;
+
+        Ok(CompleteConnectOauthResponse {
+            client_id: client_uuid.to_simple().to_string(),
+            connect_account: Some(from_account(updated_account, &stripe)?),
+        })
+    }
+
+    #[instrument(INFO)]
+    fn handle_get_connect_account(
+        &self,
+        request: &GetConnectAccountRequest,
+    ) -> Result<GetConnectAccountResponse, RequestError> {
+        use stripe_client::Stripe;
+        use uuid::Uuid;
+
+        let client_uuid = Uuid::parse_str(&request.client_id)?;
+
+        let account = self.get_connect_account(client_uuid)?;
+        let stripe = Stripe::new();
+
+        Ok(GetConnectAccountResponse {
+            client_id: client_uuid.to_simple().to_string(),
+            connect_account: Some(from_account(account, &stripe)?),
+        })
+    }
+
+    #[instrument(INFO)]
+    fn handle_update_connect_account_prefs(
+        &self,
+        request: &UpdateConnectAccountPrefsRequest,
+    ) -> Result<UpdateConnectAccountPrefsResponse, RequestError> {
+        use crate::models::{StripeConnectAccount, UpdateStripeConnectAccountPrefs};
+        use crate::schema::stripe_connect_accounts::columns::*;
+        use crate::schema::stripe_connect_accounts::table as stripe_connect_accounts;
+        use crate::stripe_client::Stripe;
+        use diesel::prelude::*;
+        use diesel::result::Error;
+        use uuid::Uuid;
+
+        let client_uuid = Uuid::parse_str(&request.client_id)?;
+        let stripe = Stripe::new();
+
+        match &request.preferences {
+            Some(prefs) => {
+                let conn = self.db_writer.get().unwrap();
+                let updated_account = conn.transaction::<StripeConnectAccount, Error, _>(|| {
+                    diesel::update(stripe_connect_accounts.filter(client_id.eq(client_uuid)))
+                        .set(UpdateStripeConnectAccountPrefs {
+                            enable_automatic_payouts: prefs.enable_automatic_payouts,
+                            automatic_payout_threshold_cents: prefs
+                                .automatic_payout_threshold_cents,
+                        })
+                        .get_result(&conn)
+                })?;
+
+                Ok(UpdateConnectAccountPrefsResponse {
+                    client_id: client_uuid.to_simple().to_string(),
+                    connect_account: Some(from_account(updated_account, &stripe)?),
+                })
+            }
+            _ => Err(RequestError::BadArguments),
+        }
+    }
 }
 
 impl proto::server::BeanCounter for BeanCounter {
     type GetBalanceFuture = FutureResult<Response<GetBalanceResponse>, Status>;
     type GetTransactionsFuture = FutureResult<Response<GetTransactionsResponse>, Status>;
     type AddCreditsFuture = FutureResult<Response<AddCreditsResponse>, Status>;
-    type WithdrawCreditsFuture = FutureResult<Response<WithdrawCreditsResponse>, Status>;
+    type ConnectPayoutFuture = FutureResult<Response<ConnectPayoutResponse>, Status>;
     type AddPaymentFuture = FutureResult<Response<AddPaymentResponse>, Status>;
     type SettlePaymentFuture = FutureResult<Response<SettlePaymentResponse>, Status>;
     type StripeChargeFuture = FutureResult<Response<StripeChargeResponse>, Status>;
+    type CompleteConnectOauthFuture = FutureResult<Response<CompleteConnectOauthResponse>, Status>;
+    type GetConnectAccountFuture = FutureResult<Response<GetConnectAccountResponse>, Status>;
+    type UpdateConnectAccountPrefsFuture =
+        FutureResult<Response<UpdateConnectAccountPrefsResponse>, Status>;
     type CheckFuture = FutureResult<Response<HealthCheckResponse>, Status>;
 
     /// Get account balance
@@ -643,13 +877,13 @@ impl proto::server::BeanCounter for BeanCounter {
             .into_future()
     }
 
-    /// Withdraw credits
-    fn withdraw_credits(
+    /// Withdraw credits via Stripe Connect transfer (payout)
+    fn connect_payout(
         &mut self,
-        request: Request<WithdrawCreditsRequest>,
-    ) -> Self::WithdrawCreditsFuture {
+        request: Request<ConnectPayoutRequest>,
+    ) -> Self::ConnectPayoutFuture {
         use futures::future::IntoFuture;
-        self.handle_withdraw_credits(request.get_ref())
+        self.handle_connect_payout(request.get_ref())
             .map(Response::new)
             .map_err(|err| Status::new(Code::InvalidArgument, err.to_string()))
             .into_future()
@@ -680,6 +914,42 @@ impl proto::server::BeanCounter for BeanCounter {
     fn stripe_charge(&mut self, request: Request<StripeChargeRequest>) -> Self::StripeChargeFuture {
         use futures::future::IntoFuture;
         self.handle_stripe_charge(request.get_ref())
+            .map(Response::new)
+            .map_err(|err| Status::new(Code::InvalidArgument, err.to_string()))
+            .into_future()
+    }
+
+    /// Complete the Stripe Connect oauth flow
+    fn complete_connect_oauth(
+        &mut self,
+        request: Request<CompleteConnectOauthRequest>,
+    ) -> Self::CompleteConnectOauthFuture {
+        use futures::future::IntoFuture;
+        self.handle_complete_connect_oauth(request.get_ref())
+            .map(Response::new)
+            .map_err(|err| Status::new(Code::InvalidArgument, err.to_string()))
+            .into_future()
+    }
+
+    /// Get the current connect account details
+    fn get_connect_account(
+        &mut self,
+        request: Request<GetConnectAccountRequest>,
+    ) -> Self::GetConnectAccountFuture {
+        use futures::future::IntoFuture;
+        self.handle_get_connect_account(request.get_ref())
+            .map(Response::new)
+            .map_err(|err| Status::new(Code::InvalidArgument, err.to_string()))
+            .into_future()
+    }
+
+    /// Update account preferences (i.e., payout prefs)
+    fn update_connect_account_prefs(
+        &mut self,
+        request: Request<UpdateConnectAccountPrefsRequest>,
+    ) -> Self::UpdateConnectAccountPrefsFuture {
+        use futures::future::IntoFuture;
+        self.handle_update_connect_account_prefs(request.get_ref())
             .map(Response::new)
             .map_err(|err| Status::new(Code::InvalidArgument, err.to_string()))
             .into_future()

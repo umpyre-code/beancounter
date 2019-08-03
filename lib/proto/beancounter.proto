@@ -19,11 +19,23 @@ service BeanCounter {
   // Add credits
   rpc AddCredits(AddCreditsRequest) returns (AddCreditsResponse);
 
-  // Withdraw credits
-  rpc WithdrawCredits(WithdrawCreditsRequest) returns (WithdrawCreditsResponse);
+  // Withdraw credits via Stripe Connect transfer (payout)
+  rpc ConnectPayout(ConnectPayoutRequest) returns (ConnectPayoutResponse);
 
   // Create a stripe charge
   rpc StripeCharge(StripeChargeRequest) returns (StripeChargeResponse);
+
+  // Complete the Stripe Connect oauth flow
+  rpc CompleteConnectOauth(CompleteConnectOauthRequest)
+      returns (CompleteConnectOauthResponse);
+
+  // Get the current connect account details
+  rpc GetConnectAccount(GetConnectAccountRequest)
+      returns (GetConnectAccountResponse);
+
+  // Update account preferences (i.e., payout prefs)
+  rpc UpdateConnectAccountPrefs(UpdateConnectAccountPrefsRequest)
+      returns (UpdateConnectAccountPrefsResponse);
 
   // Health check endpoint
   rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
@@ -42,14 +54,72 @@ message Timestamp {
   int32 nanos = 2;
 }
 
+message ConnectAccountPrefs {
+  bool enable_automatic_payouts = 1;
+  int64 automatic_payout_threshold_cents = 2;
+}
+
+message UpdateConnectAccountPrefsRequest {
+  string client_id = 1;
+  ConnectAccountPrefs preferences = 2;
+}
+
+message UpdateConnectAccountPrefsResponse {
+  string client_id = 1;
+  ConnectAccountInfo connect_account = 2;
+}
+
+message ConnectAccountInfo {
+  enum State {
+    ACTIVE = 0;
+    INACTIVE = 1;
+  }
+  State state = 1;
+  oneof connect {
+    string login_link_url = 2;
+    string oauth_url = 3;
+  }
+  ConnectAccountPrefs preferences = 4;
+}
+
+message CompleteConnectOauthRequest {
+  string client_id = 1;
+  string authorization_code = 2;
+  string oauth_state = 3;
+}
+
+message CompleteConnectOauthResponse {
+  string client_id = 1;
+  ConnectAccountInfo connect_account = 2;
+}
+
+message GetConnectAccountRequest { string client_id = 1; }
+
+message GetConnectAccountResponse {
+  string client_id = 1;
+  ConnectAccountInfo connect_account = 2;
+}
+
 message AddCreditsRequest {
   string client_id = 1;
   int32 amount_cents = 2;
 }
 message AddCreditsResponse { Balance balance = 1; }
 
-message WithdrawCreditsRequest { string client_id = 1; }
-message WithdrawCreditsResponse { string client_id = 1; }
+message ConnectPayoutRequest {
+  string client_id = 1;
+  int32 amount_cents = 2;
+}
+message ConnectPayoutResponse {
+  enum Result {
+    SUCCESS = 0;
+    INSUFFICIENT_BALANCE = 1;
+    INVALID_AMOUNT = 2;
+  }
+  Result result = 1;
+  string client_id = 2;
+  Balance balance = 3;
+}
 
 message AddPaymentRequest {
   string client_id_from = 1;

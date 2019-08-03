@@ -19,6 +19,7 @@ extern crate env_logger;
 extern crate futures;
 extern crate instrumented;
 extern crate regex;
+extern crate serde_qs;
 extern crate stripe;
 extern crate tokio;
 extern crate toml;
