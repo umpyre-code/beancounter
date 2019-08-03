@@ -817,8 +817,11 @@ impl BeanCounter {
                     diesel::update(stripe_connect_accounts.filter(client_id.eq(client_uuid)))
                         .set(UpdateStripeConnectAccountPrefs {
                             enable_automatic_payouts: prefs.enable_automatic_payouts,
-                            automatic_payout_threshold_cents: prefs
-                                .automatic_payout_threshold_cents,
+                            // Minimum payout amount is $100
+                            automatic_payout_threshold_cents: std::cmp::max(
+                                100 * 100,
+                                prefs.automatic_payout_threshold_cents,
+                            ),
                         })
                         .get_result(&conn)
                 })?;
