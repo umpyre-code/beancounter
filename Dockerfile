@@ -36,7 +36,7 @@ RUN mkdir -p $HOME/.ssh \
   && eval `ssh-agent` \
   && ssh-add -k $HOME/.ssh/id_rsa \
   && cd src \
-  && cargo install --color never --path . \
+  && cargo install -v --color never --path . \
   && cd .. \
   && rm -rf /usr/bin/sccache \
   && rm -rf src \
