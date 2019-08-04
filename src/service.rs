@@ -77,8 +77,8 @@ enum RequestError {
     NotFound,
     #[fail(display = "database error: {}", err)]
     DatabaseError { err: String },
-    #[fail(display = "invalid client_id: {}", err)]
-    InvalidClientId { err: String },
+    #[fail(display = "invalid UUID: {}", err)]
+    InvalidUuid { err: String },
     #[fail(display = "Bad arguments specified for request")]
     BadArguments,
     #[fail(display = "stripe error: {}", err)]
@@ -108,7 +108,7 @@ impl From<diesel::result::Error> for RequestError {
 
 impl From<uuid::parser::ParseError> for RequestError {
     fn from(err: uuid::parser::ParseError) -> RequestError {
-        RequestError::InvalidClientId {
+        RequestError::InvalidUuid {
             err: format!("{}", err),
         }
     }
