@@ -1,6 +1,5 @@
 use instrumented::instrument;
 use regex::Regex;
-use std::collections::HashMap;
 
 use crate::config;
 
@@ -105,12 +104,12 @@ pub struct RequestError {
 
 #[derive(Debug, Fail)]
 pub enum StripeError {
-    #[fail(display = "stripe request error: {}", err)]
+    #[fail(display = "request error: {}", err)]
     RequestError {
         err: String,
         request_error: RequestError,
     },
-    #[fail(display = "stripe error: {}", err)]
+    #[fail(display = "{}", err)]
     Error { err: String },
     #[fail(display = "json parser error: {}", err)]
     JsonParserError { err: String },
