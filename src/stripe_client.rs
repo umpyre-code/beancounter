@@ -3,6 +3,10 @@ use regex::Regex;
 
 use crate::config;
 
+// Stripe fees
+static STRIPE_BASE_FEE: i64 = 30; // 30 cents
+static STRIPE_PCT_FEE: f64 = 0.029; // 2.9%
+
 /// The list of possible values for a RequestError's type.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub enum ErrorType {
@@ -196,7 +200,7 @@ impl Stripe {
 
     pub fn calculate_stripe_fees(amount: i64) -> i64 {
         // Details on stripe fees: https://stripe.com/pricing#pricing-details
-        ((amount as f64) * 0.029).round() as i64 + 30
+        ((amount as f64) * STRIPE_PCT_FEE).round() as i64 + STRIPE_BASE_FEE
     }
 
     pub fn get_oauth_url(&self, state: String) -> String {

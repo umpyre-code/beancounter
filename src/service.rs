@@ -18,6 +18,10 @@ use crate::stripe_client;
 //   97099969.0292
 static MAX_PAYMENT_AMOUNT: i32 = 97_099_969;
 
+// Umpyre fees
+static UMPYRE_SEND_FEE: f64 = 0.15; // 15%
+static UMPYRE_READ_FEE: f64 = 0.15; // 15%
+
 lazy_static! {
     static ref PAYMENT_ADDED: prometheus::HistogramVec = {
         let histogram_opts = prometheus::HistogramOpts::new(
@@ -456,7 +460,7 @@ impl BeanCounter {
         let client_uuid_to = Uuid::parse_str(&request.client_id_to)?;
 
         let payment_cents = request.payment_cents;
-        let fee_cents = (f64::from(payment_cents) * 0.15).floor() as i32;
+        let fee_cents = (f64::from(payment_cents) * UMPYRE_SEND_FEE).floor() as i32;
         let total_amount = payment_cents + fee_cents;
 
         // Any payment over this amount will never go through
@@ -540,7 +544,8 @@ impl BeanCounter {
                     .first(&conn)?;
 
                 // If there's a valid payment, perform settlement
-                let fee_amount = (f64::from(payment.payment_cents) * 0.15).floor() as i32;
+                let fee_amount =
+                    (f64::from(payment.payment_cents) * UMPYRE_READ_FEE).floor() as i32;
                 let payment_amount_after_fee = payment.payment_cents - fee_amount;
 
                 // Add TX from umpyre cash account to recipient
