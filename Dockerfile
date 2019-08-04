@@ -18,6 +18,9 @@ ENV RUSTC_WRAPPER=sccache
 ADD https://github.com/a8m/envsubst/releases/download/v1.1.0/envsubst-Linux-x86_64 /usr/bin/envsubst
 RUN chmod +x /usr/bin/envsubst
 
+RUN apt-get update && apt-get install -yqq curl ssh \
+  && apt-get clean && rm -rf /var/lib/apt/lists
+
 WORKDIR /app
 
 COPY . /app/src
