@@ -442,4 +442,129 @@ mod tests {
              &suggested_capabilities[]=platform_payments"
         )
     }
+
+    #[test]
+    fn test_account_serde() {
+        let account_json = r#"
+        {
+            "id": "acct_1EGSngG27test",
+            "object": "account",
+            "business_profile": {
+                "mcc": "5734",
+                "name": "Umpyre Inc.",
+                "product_description": "Messaging Platform that sells usage credits, to the general public, customers select to buy usage credits or not, there is no set charge pattern.",
+                "support_address": {
+                "city": null,
+                "country": null,
+                "line1": null,
+                "line2": null,
+                "postal_code": null,
+                "state": null
+                },
+                "support_email": "support@umpyre.io",
+                "support_phone": "+12145",
+                "support_url": null,
+                "url": "umpyre.com"
+            },
+            "business_type": "company",
+            "capabilities": {
+                "card_payments": "active"
+            },
+            "charges_enabled": true,
+            "company": {
+                "address": {
+                "city": "America",
+                "country": "US",
+                "line1": "America",
+                "line2": "",
+                "postal_code": "12352",
+                "state": "NY"
+                },
+                "directors_provided": false,
+                "name": "Umpyre Inc.",
+                "owners_provided": true,
+                "phone": "+138485828",
+                "tax_id_provided": true
+            },
+            "country": "US",
+            "created": 1553182044,
+            "default_currency": "usd",
+            "details_submitted": true,
+            "email": "hello@computer.com",
+            "external_accounts": {
+                "object": "list",
+                "data": [
+                {
+                    "id": "ba_1EYythou7VT2OGssh",
+                    "object": "bank_account",
+                    "account": "acct_1aoeuaoeuGSngG27b2IeIO7",
+                    "account_holder_name": null,
+                    "account_holder_type": null,
+                    "bank_name": "BANK AND TRUST",
+                    "country": "US",
+                    "currency": "usd",
+                    "default_for_currency": true,
+                    "fingerprint": "farty",
+                    "last4": "2585",
+                    "metadata": {},
+                    "routing_number": "98741987897",
+                    "status": "new"
+                }
+                ],
+                "has_more": false,
+                "total_count": 1,
+                "url": "/v1/accounts/acct_1EGSngG0982IeIO7/external_accounts"
+            },
+            "metadata": {},
+            "payouts_enabled": true,
+            "requirements": {
+                "current_deadline": null,
+                "currently_due": [],
+                "disabled_reason": null,
+                "eventually_due": [],
+                "past_due": []
+            },
+            "settings": {
+                "branding": {
+                "icon": null,
+                "logo": null,
+                "primary_color": "dee93f"
+                },
+                "card_payments": {
+                "decline_on": {
+                    "avs_failure": false,
+                    "cvc_failure": true
+                },
+                "statement_descriptor_prefix": null
+                },
+                "dashboard": {
+                "display_name": "Umpyre",
+                "timezone": "America/New_York"
+                },
+                "payments": {
+                "statement_descriptor": "UMPYRE INC.",
+                "statement_descriptor_kana": null,
+                "statement_descriptor_kanji": null
+                },
+                "payouts": {
+                "debit_negative_balances": true,
+                "schedule": {
+                    "delay_days": 2,
+                    "interval": "manual"
+                },
+                "statement_descriptor": null
+                }
+            },
+            "tos_acceptance": {
+                "date": 1557594914,
+                "iovation_blackbox": "lyle",
+                "ip": "127.0.0.1",
+                "user_agent": null
+            },
+            "type": "custom"
+        }
+        "#;
+
+        let account: stripe::Account = serde_json::from_str(account_json).unwrap();
+    }
 }

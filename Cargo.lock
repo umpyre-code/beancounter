@@ -85,7 +85,7 @@ dependencies = [
  "serde_derive 1.0.98 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.40 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_qs 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "stripe-rust 0.10.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "stripe-rust 0.10.5 (git+ssh://git@github.com/brndnmtthws/stripe-rs.git)",
  "tokio 0.1.22 (registry+https://github.com/rust-lang/crates.io-index)",
  "toml 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "tower-hyper 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1673,7 +1673,7 @@ dependencies = [
 [[package]]
 name = "stripe-rust"
 version = "0.10.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+ssh://git@github.com/brndnmtthws/stripe-rs.git#db96bc1e648e9b24ca61a2c7d3e2264b7c452cf6"
 dependencies = [
  "chrono 0.4.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.28 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2408,7 +2408,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum spin 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "44363f6f51401c34e7be73db0db371c04705d35efbe9f7d6082e03a921a32c55"
 "checksum stable_deref_trait 1.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "dba1a27d3efae4351c8051072d619e3ade2820635c3958d826bfea39d59b54c8"
 "checksum string 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "d24114bfcceb867ca7f71a0d3fe45d45619ec47a6fbfa98cb14e14250bfa5d6d"
-"checksum stripe-rust 0.10.5 (registry+https://github.com/rust-lang/crates.io-index)" = "e49b8da71a3fc4adfb6a7e54e904f7a032989c903b6636d718fa9c8244a55939"
+"checksum stripe-rust 0.10.5 (git+ssh://git@github.com/brndnmtthws/stripe-rs.git)" = "<none>"
 "checksum strsim 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "bb4f380125926a99e52bc279241539c018323fab05ad6368b56f93d9369ff550"
 "checksum syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)" = "d3b891b9015c88c576343b9b3e41c2c11a51c219ef067b264bd9c8aa9b441dad"
 "checksum syn 0.15.42 (registry+https://github.com/rust-lang/crates.io-index)" = "eadc09306ca51a40555dd6fc2b415538e9e18bc9f870e47b1a524a79fe2dcf5e"
