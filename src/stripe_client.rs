@@ -1,4 +1,5 @@
 use instrumented::instrument;
+use regex::Regex;
 use std::collections::HashMap;
 
 use crate::config;
@@ -210,10 +211,18 @@ impl Stripe {
             },
             suggested_capabilities: vec!["platform_payments".into()],
         };
-        format!(
-            "https://connect.stripe.com/express/oauth/authorize?{}",
-            serde_qs::to_string(&qs).unwrap()
+
+        // This is a hack because Stripe does not accept lists with an index
+        // value (i.e., [0] instead of []) in the query string.
+        let re = Regex::new(r"\[\d+\]").unwrap();
+        re.replace_all(
+            &format!(
+                "https://connect.stripe.com/express/oauth/authorize?{}",
+                serde_qs::to_string(&qs).unwrap()
+            ),
+            "[]",
         )
+        .into()
     }
 
     #[instrument(INFO)]
@@ -429,7 +438,7 @@ mod tests {
              &state=somestate\
              &redirect_uri=https%3A%2F%2Fstaging.umpyre.io%2Faccounts%2Fpayouts\
              &stripe_user[business_type]=individual\
-             &suggested_capabilities[0]=platform_payments"
+             &suggested_capabilities[]=platform_payments"
         )
     }
 }
