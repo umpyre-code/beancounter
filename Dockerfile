@@ -1,4 +1,4 @@
-FROM rustlang/rust:nightly
+FROM guangie88/rustfmt-clippy:nightly
 
 ARG SSH_KEY
 ARG SCCACHE_KEY
