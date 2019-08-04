@@ -3,6 +3,8 @@ FROM guangie88/rustfmt-clippy:nightly
 ARG SSH_KEY
 ARG SCCACHE_KEY
 
+ENV CARGO_HOME=/opt/.cargo
+
 # add sccache
 ENV SCCACHE_VERSION=0.2.9
 ADD https://github.com/mozilla/sccache/releases/download/${SCCACHE_VERSION}/sccache-${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz /tmp
@@ -39,8 +41,7 @@ RUN mkdir -p $HOME/.ssh \
   && cd .. \
   && rm -rf /usr/bin/sccache \
   && rm -rf src \
-  && rm -rf $HOME/.cargo/registry \
-  && rm -rf $HOME/.cargo/git
+  && rm -rf $CARGO_HOME/registry $CARGO_HOME/git
 
 # Remove keys
 RUN rm -rf /root/.ssh/ && rm $SCCACHE_GCS_KEY_PATH
