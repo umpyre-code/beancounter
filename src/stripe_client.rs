@@ -51,7 +51,6 @@ pub struct LoginLink {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CreateLoginLink {
-    pub account: String,
     pub redirect_url: String,
 }
 
@@ -267,7 +266,6 @@ impl Stripe {
                 .post_form::<LoginLink, CreateLoginLink>(
                     &path,
                     CreateLoginLink {
-                        account: stripe_user_id.into(),
                         redirect_url: self.redirect_uri.clone(),
                     },
                 )
