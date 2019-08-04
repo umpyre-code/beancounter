@@ -1,5 +1,5 @@
 [stripe]
-redirect_uri = "https://staging.umpyre.io/accounts/payouts"
+redirect_uri = "https://staging.umpyre.io/account/payouts"
 connect_client_id = "ca_FVZ7xsdnQsZChPyqzq4sDtwCMSoATpPz"
 
 [service]

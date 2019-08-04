@@ -431,7 +431,7 @@ mod tests {
             "https://connect.stripe.com/express/oauth/authorize?\
              client_id=ca_FVZ7xsdnQsZChPyqzq4sDtwCMSoATpPz\
              &state=somestate\
-             &redirect_uri=https%3A%2F%2Fstaging.umpyre.io%2Faccounts%2Fpayouts\
+             &redirect_uri=https%3A%2F%2Fstaging.umpyre.io%2Faccount%2Fpayouts\
              &stripe_user[business_type]=individual\
              &suggested_capabilities[]=platform_payments"
         )
