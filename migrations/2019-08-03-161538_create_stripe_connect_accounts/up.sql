@@ -8,4 +8,4 @@ CREATE TABLE stripe_connect_accounts (
   connect_account JSON,
   connect_credentials JSON,
   enable_automatic_payouts BOOLEAN NOT NULL DEFAULT FALSE,
-  automatic_payout_threshold_cents BIGINT NOT NULL DEFAULT 100)
+  automatic_payout_threshold_cents BIGINT NOT NULL DEFAULT 10000)

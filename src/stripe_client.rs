@@ -245,12 +245,14 @@ impl Stripe {
                 .post("https://connect.stripe.com/oauth/token")
                 .form(&params)
                 .send()
-                .and_then(|mut resp| resp.json::<ConnectCredentials>())
+                .and_then(|mut resp| resp.text())
                 .map(|credentials| credentials)
                 .then(move |r| tx.send(r).map_err(|_werr| error!("failure"))),
         ))
         .unwrap();
         let credentials = rx.wait().unwrap()?;
+        info!("creds: {}", credentials);
+        let credentials: ConnectCredentials = serde_json::from_str(&credentials)?;
 
         Ok(credentials)
     }
