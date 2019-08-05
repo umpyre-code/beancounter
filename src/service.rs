@@ -77,7 +77,7 @@ pub struct BeanCounter {
 }
 
 #[derive(Debug, Fail)]
-enum RequestError {
+pub enum RequestError {
     #[fail(display = "not found")]
     NotFound,
     #[fail(display = "database error: {}", err)]
@@ -723,7 +723,7 @@ impl BeanCounter {
     }
 
     #[instrument(INFO)]
-    fn handle_connect_payout(
+    pub fn handle_connect_payout(
         &self,
         request: &ConnectPayoutRequest,
     ) -> Result<ConnectPayoutResponse, RequestError> {

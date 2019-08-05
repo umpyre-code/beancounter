@@ -1,13 +1,18 @@
 #[macro_use]
+extern crate diesel;
+#[macro_use]
 extern crate failure;
+#[macro_use]
+extern crate log;
 
 extern crate beancounter;
 extern crate chrono;
-extern crate diesel;
 extern crate env_logger;
 
 use beancounter::config;
 use beancounter::database;
+use diesel::sql_types::*;
+use uuid::Uuid;
 
 #[derive(Debug, Fail)]
 pub enum Error {
@@ -21,6 +26,20 @@ impl From<diesel::result::Error> for Error {
             err: err.to_string(),
         }
     }
+}
+
+#[derive(Debug, QueryableByName)]
+pub struct ClientPayout {
+    #[sql_type = "diesel::pg::types::sql_types::Uuid"]
+    pub client_id: Uuid,
+    #[sql_type = "BigInt"]
+    pub withdrawable_cents: i64,
+    #[sql_type = "Bool"]
+    pub enable_automatic_payouts: bool,
+    #[sql_type = "BigInt"]
+    pub automatic_payout_threshold_cents: i64,
+    #[sql_type = "Nullable<Text>"]
+    pub stripe_user_id: Option<String>,
 }
 
 fn do_cleanup() -> Result<(), Error> {
@@ -66,6 +85,61 @@ fn do_cleanup() -> Result<(), Error> {
     Ok(())
 }
 
+fn do_payouts() -> Result<(), Error> {
+    use beancounter_grpc::proto::ConnectPayoutRequest;
+    use diesel::prelude::*;
+    use diesel::sql_query;
+
+    let db_pool_reader = database::get_db_pool(&config::CONFIG.database.reader);
+    let db_pool_writer = database::get_db_pool(&config::CONFIG.database.writer);
+    let beancounter =
+        beancounter::service::BeanCounter::new(db_pool_reader.clone(), db_pool_writer.clone());
+
+    let reader_conn = db_pool_reader.get().unwrap();
+
+    let payout_results: Vec<ClientPayout> = sql_query(
+        r#"
+        SELECT
+            b.client_id,
+            b.withdrawable_cents,
+            a.enable_automatic_payouts,
+            a.automatic_payout_threshold_cents,
+            a.stripe_user_id
+        FROM
+            balances AS b
+            INNER JOIN stripe_connect_accounts AS a ON b.client_id = a.client_id
+        WHERE
+            withdrawable_cents >= a.automatic_payout_threshold_cents
+            AND a.enable_automatic_payouts = TRUE
+            AND NOT EXISTS (
+                SELECT
+                    *
+                FROM
+                    stripe_connect_transfers AS t
+                WHERE
+                    t.created_at >= NOW() - interval '24 hours'
+                    AND b.client_id = t.client_id);
+           "#,
+    )
+    .load(&reader_conn)?;
+
+    info!("{} payouts to process", payout_results.len());
+
+    for payout in payout_results.iter() {
+        let payout = beancounter.handle_connect_payout(&ConnectPayoutRequest {
+            client_id: payout.client_id.to_simple().to_string(),
+            amount_cents: payout.withdrawable_cents as i32,
+        });
+
+        match payout {
+            Ok(payout) => info!("Payout: {:?}", payout),
+            Err(err) => error!("Payout error: {:?}", err),
+        }
+    }
+
+    Ok(())
+}
+
 pub fn main() -> Result<(), Error> {
     use std::env;
 
@@ -78,5 +152,8 @@ pub fn main() -> Result<(), Error> {
         instrumented::init(&config::CONFIG.metrics.bind_to_address);
     }
 
-    do_cleanup()
+    do_cleanup()?;
+    do_payouts()?;
+
+    Ok(())
 }
