@@ -18,7 +18,7 @@ steps:
   args: ['-c', 'docker build --build-arg SSH_KEY="$$SSH_KEY" --build-arg SCCACHE_KEY="$$SCCACHE_KEY"  -t gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:latest -t gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:$REVISION_ID --cache-from gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:latest --cache-from rust:latest .']
   secretEnv: ['SSH_KEY', 'SCCACHE_KEY']
 - name: gcr.io/cloud-builders/gsutil
-  args: ['-m', 'cp', '-r', '/root/.cache/*', 'gs://umpyre-sccache/.cache/']
+  args: ['-m', 'cp', '-r', '/root/.cache/*', 'gs://umpyre-sccache/.cache']
 images: [
    'gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:latest','gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:$REVISION_ID',
 ]
