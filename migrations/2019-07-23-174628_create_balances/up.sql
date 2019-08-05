@@ -4,4 +4,5 @@ CREATE TABLE balances (
   updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
   client_id UUID UNIQUE NOT NULL,
   balance_cents BIGINT NOT NULL DEFAULT 0,
-  promo_cents BIGINT NOT NULL DEFAULT 0)
+  promo_cents BIGINT NOT NULL DEFAULT 0,
+  withdrawable_cents BIGINT NOT NULL DEFAULT 0)

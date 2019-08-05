@@ -27,6 +27,7 @@ fn do_cleanup() -> Result<(), Error> {
     use beancounter::models::Payment;
     use beancounter::schema::payments::dsl::*;
     use beancounter::service::add_transaction;
+    use beancounter::sql_types::TransactionReason;
     use chrono::{Duration, Utc};
     use diesel::connection::Connection;
     use diesel::prelude::*;
@@ -49,6 +50,7 @@ fn do_cleanup() -> Result<(), Error> {
                 Some(payment.client_id_from),
                 None,
                 payment.payment_cents,
+                TransactionReason::MessageUnread,
                 &conn,
             )?;
 

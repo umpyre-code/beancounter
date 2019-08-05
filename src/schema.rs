@@ -9,6 +9,7 @@ table! {
         client_id -> Uuid,
         balance_cents -> Int8,
         promo_cents -> Int8,
+        withdrawable_cents -> Int8,
     }
 }
 
@@ -83,6 +84,7 @@ table! {
         created_at -> Timestamp,
         client_id -> Nullable<Uuid>,
         tx_type -> Transaction_type,
+        tx_reason -> Transaction_reason,
         amount_cents -> Int4,
     }
 }

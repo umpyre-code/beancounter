@@ -8,6 +8,7 @@ use instrumented::{instrument, prometheus, register};
 
 use crate::models;
 use crate::schema;
+use crate::sql_types;
 use crate::stripe_client;
 
 // This amount is calculated by subtracting Stripe's maximum fee of 2.9% + 30c
@@ -120,7 +121,7 @@ impl From<uuid::parser::ParseError> for RequestError {
 
 impl From<&models::Transaction> for Transaction {
     fn from(tx: &models::Transaction) -> Self {
-        use crate::sql_types::TransactionType;
+        use crate::sql_types::{TransactionReason, TransactionType};
         Self {
             client_id: tx.client_id.unwrap().to_simple().to_string(),
             created_at: Some(tx.created_at.into()),
@@ -129,6 +130,13 @@ impl From<&models::Transaction> for Transaction {
                 TransactionType::Credit => transaction::Type::Credit,
                 TransactionType::PromoCredit => transaction::Type::PromoCredit,
                 TransactionType::Debit => transaction::Type::Debit,
+            } as i32,
+            tx_reason: match tx.tx_reason {
+                TransactionReason::MessageRead => transaction::Reason::MessageRead,
+                TransactionReason::MessageUnread => transaction::Reason::MessageUnread,
+                TransactionReason::MessageSent => transaction::Reason::MessageSent,
+                TransactionReason::CreditAdded => transaction::Reason::CreditAdded,
+                TransactionReason::Payout => transaction::Reason::Payout,
             } as i32,
         }
     }
@@ -140,6 +148,7 @@ impl From<models::Balance> for beancounter_grpc::proto::Balance {
             client_id: balance.client_id.to_simple().to_string(),
             balance_cents: balance.balance_cents,
             promo_cents: balance.promo_cents,
+            withdrawable_cents: balance.withdrawable_cents,
         }
     }
 }
@@ -225,7 +234,8 @@ fn update_and_return_balance(
         .filter(
             tx_type
                 .eq(TransactionType::PromoCredit)
-                .and(client_id.eq(client_uuid)),
+                .and(client_id.eq(client_uuid))
+                .and(tx_reason.eq(TransactionReason::CreditAdded)),
         )
         .select(sum(amount_cents))
         .first::<Option<i64>>(conn)?
@@ -244,17 +254,43 @@ fn update_and_return_balance(
     let (balance_cents_remaining, promo_cents_remaining) =
         calculate_balance(credit_sum, promo_credit_sum, debit_sum);
 
+    let payments_sum = transactions
+        .filter(
+            tx_type
+                .eq(TransactionType::Credit)
+                .and(client_id.eq(client_uuid))
+                .and(tx_reason.eq(TransactionReason::MessageRead)),
+        )
+        .select(sum(amount_cents))
+        .first::<Option<i64>>(conn)?
+        .unwrap_or_else(|| 0);
+
+    let withdrawn_sum = transactions
+        .filter(
+            tx_type
+                .eq(TransactionType::Debit)
+                .and(client_id.eq(client_uuid))
+                .and(tx_reason.eq(TransactionReason::Payout)),
+        )
+        .select(sum(amount_cents))
+        .first::<Option<i64>>(conn)?
+        .unwrap_or_else(|| 0);
+
+    let withdrawable_cents_remaining = payments_sum - withdrawn_sum;
+
     Ok(insert_into(balances)
         .values(&NewBalance {
             client_id: client_uuid,
             balance_cents: balance_cents_remaining,
             promo_cents: promo_cents_remaining,
+            withdrawable_cents: withdrawable_cents_remaining,
         })
         .on_conflict(schema::balances::columns::client_id)
         .do_update()
         .set(&UpdatedBalance {
             balance_cents: balance_cents_remaining,
-            promo_cents: 0,
+            promo_cents: promo_cents_remaining,
+            withdrawable_cents: withdrawable_cents_remaining,
         })
         .get_result(conn)?)
 }
@@ -264,6 +300,7 @@ pub fn add_transaction(
     client_id_credit: Option<uuid::Uuid>,
     client_id_debit: Option<uuid::Uuid>,
     amount_cents: i32,
+    reason: sql_types::TransactionReason,
     conn: &diesel::r2d2::PooledConnection<diesel::r2d2::ConnectionManager<diesel::PgConnection>>,
 ) -> Result<(models::Transaction, models::Transaction), diesel::result::Error> {
     use crate::models::*;
@@ -274,11 +311,13 @@ pub fn add_transaction(
     let tx_credit = NewTransaction {
         client_id: client_id_credit,
         tx_type: TransactionType::Credit,
+        tx_reason: reason,
         amount_cents,
     };
     let tx_debit = NewTransaction {
         client_id: client_id_debit,
         tx_type: TransactionType::Debit,
+        tx_reason: reason,
         amount_cents: -amount_cents, // Debits should be negative
     };
 
@@ -316,11 +355,7 @@ impl BeanCounter {
         let balance = self.get_balance(client_uuid)?;
 
         Ok(GetBalanceResponse {
-            balance: Some(beancounter_grpc::proto::Balance {
-                client_id: balance.client_id.to_simple().to_string(),
-                balance_cents: balance.balance_cents,
-                promo_cents: balance.promo_cents,
-            }),
+            balance: Some(balance.into()),
         })
     }
 
@@ -425,6 +460,7 @@ impl BeanCounter {
         request: &AddCreditsRequest,
     ) -> Result<AddCreditsResponse, RequestError> {
         use crate::models::*;
+        use crate::sql_types::TransactionReason;
         use diesel::prelude::*;
         use diesel::result::Error;
         use uuid::Uuid;
@@ -433,7 +469,13 @@ impl BeanCounter {
 
         let conn = self.db_writer.get().unwrap();
         let balance = conn.transaction::<Balance, Error, _>(|| {
-            add_transaction(Some(client_uuid), None, request.amount_cents, &conn)?;
+            add_transaction(
+                Some(client_uuid),
+                None,
+                request.amount_cents,
+                TransactionReason::CreditAdded,
+                &conn,
+            )?;
             Ok(update_and_return_balance(client_uuid, &conn)?)
         })?;
 
@@ -449,6 +491,7 @@ impl BeanCounter {
     ) -> Result<AddPaymentResponse, RequestError> {
         use crate::models::NewPayment;
         use crate::models::*;
+        use crate::sql_types::TransactionReason;
         use data_encoding::BASE64_NOPAD;
         use diesel::insert_into;
         use diesel::prelude::*;
@@ -491,10 +534,22 @@ impl BeanCounter {
             if total_amount > 0 {
                 // Credit the cash account, debit the sender. This TX is
                 // refundable.
-                add_transaction(None, Some(client_uuid_from), payment_cents, &conn)?;
+                add_transaction(
+                    None,
+                    Some(client_uuid_from),
+                    payment_cents,
+                    TransactionReason::MessageSent,
+                    &conn,
+                )?;
 
                 // Credit the cash account, debit the sender. This TX is non-refundable.
-                add_transaction(None, Some(client_uuid_from), fee_cents, &conn)?;
+                add_transaction(
+                    None,
+                    Some(client_uuid_from),
+                    fee_cents,
+                    TransactionReason::MessageSent,
+                    &conn,
+                )?;
             }
 
             // Finally, create a payment record.
@@ -532,6 +587,7 @@ impl BeanCounter {
         use crate::models::*;
         use crate::schema::payments::columns::*;
         use crate::schema::payments::table as payments;
+        use crate::sql_types::TransactionReason;
         use data_encoding::BASE64_NOPAD;
         use diesel::prelude::*;
         use diesel::result::Error;
@@ -553,6 +609,7 @@ impl BeanCounter {
                     Some(payment.client_id_to),
                     None,
                     payment_amount_after_fee,
+                    TransactionReason::MessageRead,
                     &conn,
                 )?;
 
@@ -585,6 +642,7 @@ impl BeanCounter {
         &self,
         request: &StripeChargeRequest,
     ) -> Result<StripeChargeResponse, RequestError> {
+        use crate::sql_types::TransactionReason;
         use crate::stripe_client::{Stripe, StripeError};
         use diesel::prelude::*;
         use diesel::result::Error;
@@ -603,6 +661,7 @@ impl BeanCounter {
                 Some(client_uuid),
                 None,
                 (i64::from(request.amount_cents) - stripe_fee_amount_cents) as i32,
+                TransactionReason::CreditAdded,
                 &conn,
             )?;
 
@@ -673,6 +732,7 @@ impl BeanCounter {
         };
         use crate::schema::stripe_connect_accounts::table as stripe_connect_accounts;
         use crate::schema::stripe_connect_transfers::table as stripe_connect_transfers;
+        use crate::sql_types::TransactionReason;
         use crate::stripe_client::Stripe;
         use diesel::prelude::*;
         use uuid::Uuid;
@@ -710,7 +770,13 @@ impl BeanCounter {
                 .get_result(&conn)?;
 
             // Add TX from client account to cash account
-            add_transaction(None, Some(client_uuid), request.amount_cents, &conn)?;
+            add_transaction(
+                None,
+                Some(client_uuid),
+                request.amount_cents,
+                TransactionReason::Payout,
+                &conn,
+            )?;
 
             let balance = update_and_return_balance(client_uuid, &conn)?;
 
@@ -1340,6 +1406,7 @@ mod tests {
                 .unwrap();
             assert_eq!(recipient_balance.balance_cents, 0);
             assert_eq!(recipient_balance.promo_cents, 0);
+            assert_eq!(recipient_balance.withdrawable_cents, 0);
         }
 
         check_zero_sum(&db_pool_reader);
@@ -1463,6 +1530,10 @@ mod tests {
                 i64::from(result.payment_cents)
             );
             assert_eq!(recipient_balance.promo_cents, 0);
+            assert_eq!(
+                recipient_balance.withdrawable_cents,
+                i64::from(result.payment_cents)
+            );
 
             // Attempt to settle the payment again, it should fail
             let result = beancounter.handle_settle_payment(&SettlePaymentRequest {

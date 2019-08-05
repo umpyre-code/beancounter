@@ -3,4 +3,5 @@ CREATE TABLE transactions (
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   client_id UUID,
   tx_type TRANSACTION_TYPE NOT NULL,
+  tx_reason TRANSACTION_REASON NOT NULL,
   amount_cents INTEGER NOT NULL)

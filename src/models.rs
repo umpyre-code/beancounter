@@ -12,6 +12,7 @@ pub struct Transaction {
     pub created_at: NaiveDateTime,
     pub client_id: Option<Uuid>,
     pub tx_type: TransactionType,
+    pub tx_reason: TransactionReason,
     pub amount_cents: i32,
 }
 
@@ -20,6 +21,7 @@ pub struct Transaction {
 pub struct NewTransaction {
     pub client_id: Option<Uuid>,
     pub tx_type: TransactionType,
+    pub tx_reason: TransactionReason,
     pub amount_cents: i32,
 }
 
@@ -31,6 +33,7 @@ pub struct Balance {
     pub client_id: Uuid,
     pub balance_cents: i64,
     pub promo_cents: i64,
+    pub withdrawable_cents: i64,
 }
 
 #[derive(Insertable)]
@@ -39,6 +42,7 @@ pub struct NewBalance {
     pub client_id: Uuid,
     pub balance_cents: i64,
     pub promo_cents: i64,
+    pub withdrawable_cents: i64,
 }
 
 #[derive(Insertable)]
@@ -52,6 +56,7 @@ pub struct NewZeroBalance {
 pub struct UpdatedBalance {
     pub balance_cents: i64,
     pub promo_cents: i64,
+    pub withdrawable_cents: i64,
 }
 
 #[derive(Queryable, Identifiable)]
