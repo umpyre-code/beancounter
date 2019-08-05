@@ -12,8 +12,8 @@ RUN cd /tmp \
   && tar xf sccache-${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz \
   && mv sccache-${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache /usr/bin/sccache \
   && rm -rf /tmp/sccache-*
-ENV SCCACHE_GCS_BUCKET=umpyre-sccache
-ENV SCCACHE_GCS_RW_MODE=READ_WRITE
+# ENV SCCACHE_GCS_BUCKET=umpyre-sccache
+# ENV SCCACHE_GCS_RW_MODE=READ_WRITE
 ENV SCCACHE_GCS_KEY_PATH=/root/sccache.json
 ENV RUSTC_WRAPPER=sccache
 
