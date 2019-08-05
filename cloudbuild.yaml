@@ -22,7 +22,7 @@ steps:
 images: [
    'gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:latest','gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:$REVISION_ID',
 ]
-timeout: 1h
+timeout: 3600s
 secrets:
 - kmsKeyName: projects/umpyre/locations/global/keyRings/deploy/cryptoKeys/deploy-key
   secretEnv:
