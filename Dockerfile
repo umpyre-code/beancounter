@@ -5,7 +5,7 @@ ARG SCCACHE_KEY
 
 WORKDIR /app
 
-ADD out/* /usr/bin
+ADD out/* /usr/bin/
 ADD entrypoint.sh /app
 
 ENV RUST_LOG=info
