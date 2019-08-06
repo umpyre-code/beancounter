@@ -41,9 +41,9 @@ cargo build --release --out-dir=out -Z unstable-options
 sccache -s
 
 tar czf cache.tar.gz sccache target
-gsutil cp cache.tar.gz gs://umpyre-sccache/$REPO_NAME/cache.tar.gz || true
+gsutil -o GSUtil:parallel_composite_upload_threshold=150M cp cache.tar.gz gs://umpyre-sccache/$REPO_NAME/cache.tar.gz || true
 rm -f cache.tar.gz
 cd $CARGO_HOME
 tar czf cargo.tar.gz registry git
-gsutil cp cargo.tar.gz gs://umpyre-sccache/$REPO_NAME/cargo.tar.gz || true
+gsutil -o GSUtil:parallel_composite_upload_threshold=150M cp cargo.tar.gz gs://umpyre-sccache/$REPO_NAME/cargo.tar.gz || true
 rm -f cargo.tar.gz
