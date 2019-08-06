@@ -591,12 +591,19 @@ impl BeanCounter {
         use data_encoding::BASE64_NOPAD;
         use diesel::prelude::*;
         use diesel::result::Error;
+        use uuid::Uuid;
+
+        let client_uuid_to = Uuid::parse_str(&request.client_id)?;
 
         let conn = self.db_writer.get().unwrap();
         let (payment_amount_after_fee, fee_amount, balance) = conn
             .transaction::<(i32, i32, Balance), Error, _>(|| {
                 let payment: Payment = payments
-                    .filter(message_hash.eq(BASE64_NOPAD.encode(&request.message_hash)))
+                    .filter(
+                        client_id_to
+                            .eq(client_uuid_to)
+                            .and(message_hash.eq(BASE64_NOPAD.encode(&request.message_hash))),
+                    )
                     .first(&conn)?;
 
                 // If there's a valid payment, perform settlement

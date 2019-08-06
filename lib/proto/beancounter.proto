@@ -142,7 +142,10 @@ message AddPaymentResponse {
   Balance balance = 4;
 }
 
-message SettlePaymentRequest { bytes message_hash = 1; }
+message SettlePaymentRequest {
+  string client_id = 1;
+  bytes message_hash = 2;
+}
 message SettlePaymentResponse {
   // The fee collected by Umpyre
   int32 fee_cents = 1;
