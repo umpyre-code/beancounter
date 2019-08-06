@@ -1,1 +1,10 @@
-target
+cloud_sql_proxy
+
+/target/
+**/*.rs.bk
+
+# Ignore dotenv
+.env
+
+# Ignore sccache dir, if it exists
+/sccache/
