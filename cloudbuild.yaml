@@ -10,11 +10,15 @@ steps:
   args:
   - '-c'
   - |
-   docker pull guangie88/rustfmt-clippy:nightly || true
+   docker pull gcr.io/umpyre/github.com/umpyre-code/rust:latest || true
+- name: 'gcr.io/umpyre/github.com/umpyre-code/rust:latest'
+  entrypoint: '/workspace/build.sh'
+  env:
+   - 'REPO_NAME=$REPO_NAME'
+  secretEnv: ['SSH_KEY', 'SCCACHE_KEY']
 - name: 'gcr.io/cloud-builders/docker'
   entrypoint: 'bash'
-  args: ['-c', 'docker build --build-arg SSH_KEY="$$SSH_KEY" --build-arg SCCACHE_KEY="$$SCCACHE_KEY"  -t gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:latest -t gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:$REVISION_ID --cache-from gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:latest --cache-from rust:latest .']
-  secretEnv: ['SSH_KEY', 'SCCACHE_KEY']
+  args: ['-c', 'docker build -t gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:latest -t gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:$REVISION_ID --cache-from gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:latest --cache-from gcr.io/umpyre/github.com/umpyre-code/rust:latest .']
 images: [
    'gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:latest','gcr.io/$PROJECT_ID/github.com/umpyre-code/beancounter:$REVISION_ID',
 ]
