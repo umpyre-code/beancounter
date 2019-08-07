@@ -492,7 +492,7 @@ impl BeanCounter {
         use crate::models::NewPayment;
         use crate::models::*;
         use crate::sql_types::TransactionReason;
-        use data_encoding::BASE64_NOPAD;
+        use data_encoding::BASE64URL_NOPAD;
         use diesel::insert_into;
         use diesel::prelude::*;
         use diesel::result::Error;
@@ -557,7 +557,7 @@ impl BeanCounter {
                 client_id_from: client_uuid_from,
                 client_id_to: client_uuid_to,
                 payment_cents,
-                message_hash: BASE64_NOPAD.encode(&request.message_hash),
+                message_hash: BASE64URL_NOPAD.encode(&request.message_hash),
             };
             insert_into(payments).values(&payment).execute(&conn)?;
 
@@ -588,7 +588,7 @@ impl BeanCounter {
         use crate::schema::payments::columns::*;
         use crate::schema::payments::table as payments;
         use crate::sql_types::TransactionReason;
-        use data_encoding::BASE64_NOPAD;
+        use data_encoding::BASE64URL_NOPAD;
         use diesel::prelude::*;
         use diesel::result::Error;
         use uuid::Uuid;
@@ -602,7 +602,7 @@ impl BeanCounter {
                     .filter(
                         client_id_to
                             .eq(client_uuid_to)
-                            .and(message_hash.eq(BASE64_NOPAD.encode(&request.message_hash))),
+                            .and(message_hash.eq(BASE64URL_NOPAD.encode(&request.message_hash))),
                     )
                     .first(&conn)?;
 
@@ -622,7 +622,7 @@ impl BeanCounter {
 
                 // delete the payment
                 diesel::delete(payments)
-                    .filter(message_hash.eq(BASE64_NOPAD.encode(&request.message_hash)))
+                    .filter(message_hash.eq(BASE64URL_NOPAD.encode(&request.message_hash)))
                     .execute(&conn)?;
 
                 let balance = update_and_return_balance(payment.client_id_to, &conn)?;
