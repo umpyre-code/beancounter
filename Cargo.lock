@@ -696,20 +696,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "instrumented"
 version = "0.1.0"
-source = "git+ssh://git@github.com/umpyre-code/instrumented.git#660cd43c8efb73c74da75ff43e6919be19a58c13"
+source = "git+ssh://git@github.com/umpyre-code/instrumented.git#ae2cd8a3d92446f1720be862f58e53e25361fdbf"
 dependencies = [
  "hyper 0.12.33 (registry+https://github.com/rust-lang/crates.io-index)",
  "instrumented-codegen 0.1.0 (git+ssh://git@github.com/umpyre-code/instrumented.git)",
  "lazy_static 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
- "prometheus 0.7.0 (git+https://github.com/pingcap/rust-prometheus.git)",
+ "prometheus 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio 0.1.22 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "instrumented-codegen"
 version = "0.1.0"
-source = "git+ssh://git@github.com/umpyre-code/instrumented.git#660cd43c8efb73c74da75ff43e6919be19a58c13"
+source = "git+ssh://git@github.com/umpyre-code/instrumented.git#ae2cd8a3d92446f1720be862f58e53e25361fdbf"
 dependencies = [
  "darling 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "proc-macro2 0.4.30 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1125,7 +1125,7 @@ dependencies = [
 [[package]]
 name = "prometheus"
 version = "0.7.0"
-source = "git+https://github.com/pingcap/rust-prometheus.git#4705f3b1e01c26f0302946110cb4caa14df6f8b4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "cfg-if 0.1.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "fnv 1.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2296,7 +2296,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum pq-sys 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)" = "6ac25eee5a0582f45a67e837e350d784e7003bd29a5f460796772061ca49ffda"
 "checksum proc-macro2 0.4.30 (registry+https://github.com/rust-lang/crates.io-index)" = "cf3d2011ab5c909338f7887f4fc896d35932e29146c12c8d01da6b22a80ba759"
 "checksum procinfo 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "f42e8578852a3306838981aedad8c5642ba794929aa12af0c9eb6c072b77af6c"
-"checksum prometheus 0.7.0 (git+https://github.com/pingcap/rust-prometheus.git)" = "<none>"
+"checksum prometheus 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "5567486d5778e2c6455b1b90ff1c558f29e751fc018130fa182e15828e728af1"
 "checksum prost 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "96d14b1c185652833d24aaad41c5832b0be5616a590227c1fbff57c616754b23"
 "checksum prost-build 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "eb788126ea840817128183f8f603dce02cb7aea25c2a0b764359d8e20010702e"
 "checksum prost-derive 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "5e7dc378b94ac374644181a2247cebf59a6ec1c88b49ac77f3a94b86b79d0e11"
