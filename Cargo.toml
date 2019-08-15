@@ -3,6 +3,7 @@ name = "beancounter"
 version = "0.1.0"
 authors = ["Brenden Matthews <brenden@brndn.io>"]
 edition = "2018"
+default-run = "beancounter"
 
 [dependencies]
 beancounter-grpc = { path = "lib" }
