@@ -23,8 +23,16 @@ static MAX_PAYMENT_AMOUNT: i32 = 97_099_969;
 static UMPYRE_MESSAGE_SEND_FEE: f64 = 0.15; // 15%
 static UMPYRE_MESSAGE_READ_FEE: f64 = 0.15; // 15%
 
+fn make_intcounter(name: &str, description: &str) -> prometheus::IntCounter {
+    let counter = prometheus::IntCounter::new(name, description).unwrap();
+    register(Box::new(counter.clone())).unwrap();
+    counter
+}
+
 lazy_static! {
-    static ref PAYMENT_ADDED: prometheus::HistogramVec = {
+    static ref PAYMENT_ADDED: prometheus::IntCounter =
+        make_intcounter("payment_added_amount", "Payment added amount");
+    static ref PAYMENT_ADDED_HISTO: prometheus::HistogramVec = {
         let histogram_opts = prometheus::HistogramOpts::new(
             "payment_added_amount",
             "Histogram of payment added amounts",
@@ -35,7 +43,9 @@ lazy_static! {
 
         histogram
     };
-    static ref PAYMENT_ADDED_FEE: prometheus::HistogramVec = {
+    static ref PAYMENT_ADDED_FEE: prometheus::IntCounter =
+        make_intcounter("payment_added_fee_amount", "Payment added fee amount");
+    static ref PAYMENT_ADDED_FEE_HISTO: prometheus::HistogramVec = {
         let histogram_opts = prometheus::HistogramOpts::new(
             "payment_added_fee_amount",
             "Histogram of payment added fee amounts",
@@ -46,7 +56,9 @@ lazy_static! {
 
         histogram
     };
-    static ref PAYMENT_SETTLED: prometheus::HistogramVec = {
+    static ref PAYMENT_SETTLED: prometheus::IntCounter =
+        make_intcounter("payment_settled_amount", "Payment settled amount");
+    static ref PAYMENT_SETTLED_HISTO: prometheus::HistogramVec = {
         let histogram_opts = prometheus::HistogramOpts::new(
             "payment_settled_amount",
             "Histogram of payment settled amounts",
@@ -57,7 +69,9 @@ lazy_static! {
 
         histogram
     };
-    static ref PAYMENT_SETTLED_FEE: prometheus::HistogramVec = {
+    static ref PAYMENT_SETTLED_FEE: prometheus::IntCounter =
+        make_intcounter("payment_settled_fee_amount", "Payment settled fee amount");
+    static ref PAYMENT_SETTLED_FEE_HISTO: prometheus::HistogramVec = {
         let histogram_opts = prometheus::HistogramOpts::new(
             "payment_settled_fee_amount",
             "Histogram of payment settled fee amounts",
@@ -564,10 +578,12 @@ impl BeanCounter {
             Ok(update_and_return_balance(client_uuid_from, &conn)?)
         })?;
 
-        PAYMENT_ADDED
+        PAYMENT_ADDED.inc_by(i64::from(payment_cents));
+        PAYMENT_ADDED_HISTO
             .with_label_values(&[])
             .observe(f64::from(payment_cents));
-        PAYMENT_ADDED_FEE
+        PAYMENT_ADDED_FEE.inc_by(i64::from(fee_cents));
+        PAYMENT_ADDED_FEE_HISTO
             .with_label_values(&[])
             .observe(f64::from(fee_cents));
 
@@ -630,10 +646,12 @@ impl BeanCounter {
                 Ok((payment_amount_after_fee, fee_amount, balance))
             })?;
 
-        PAYMENT_SETTLED
+        PAYMENT_SETTLED.inc_by(i64::from(payment_amount_after_fee));
+        PAYMENT_SETTLED_HISTO
             .with_label_values(&[])
             .observe(f64::from(payment_amount_after_fee));
-        PAYMENT_SETTLED_FEE
+        PAYMENT_SETTLED_FEE.inc_by(i64::from(payment_amount_after_fee));
+        PAYMENT_SETTLED_FEE_HISTO
             .with_label_values(&[])
             .observe(f64::from(fee_amount));
 
