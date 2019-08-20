@@ -39,7 +39,7 @@ const PAYMENT_FEE_HISTO_BUCKETS: &[f64; 11] = &[
 
 lazy_static! {
     static ref PAYMENT_ADDED: prometheus::IntCounter =
-        make_intcounter("payment_added_cent", "Payment added amount in cents");
+        make_intcounter("payment_added_cents", "Payment added amount in cents");
     static ref PAYMENT_ADDED_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
             "payment_added_cents_histo",
