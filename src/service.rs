@@ -32,12 +32,12 @@ fn make_intcounter(name: &str, description: &str) -> prometheus::IntCounter {
 lazy_static! {
     static ref PAYMENT_ADDED: prometheus::IntCounter =
         make_intcounter("payment_added_amount", "Payment added amount");
-    static ref PAYMENT_ADDED_HISTO: prometheus::HistogramVec = {
+    static ref PAYMENT_ADDED_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
             "payment_added_amount",
             "Histogram of payment added amounts",
         );
-        let histogram = prometheus::HistogramVec::new(histogram_opts, &[]).unwrap();
+        let histogram = prometheus::Histogram::with_opts(histogram_opts).unwrap();
 
         register(Box::new(histogram.clone())).unwrap();
 
@@ -45,12 +45,12 @@ lazy_static! {
     };
     static ref PAYMENT_ADDED_FEE: prometheus::IntCounter =
         make_intcounter("payment_added_fee_amount", "Payment added fee amount");
-    static ref PAYMENT_ADDED_FEE_HISTO: prometheus::HistogramVec = {
+    static ref PAYMENT_ADDED_FEE_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
             "payment_added_fee_amount",
             "Histogram of payment added fee amounts",
         );
-        let histogram = prometheus::HistogramVec::new(histogram_opts, &[]).unwrap();
+        let histogram = prometheus::Histogram::with_opts(histogram_opts).unwrap();
 
         register(Box::new(histogram.clone())).unwrap();
 
@@ -58,12 +58,12 @@ lazy_static! {
     };
     static ref PAYMENT_SETTLED: prometheus::IntCounter =
         make_intcounter("payment_settled_amount", "Payment settled amount");
-    static ref PAYMENT_SETTLED_HISTO: prometheus::HistogramVec = {
+    static ref PAYMENT_SETTLED_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
             "payment_settled_amount",
             "Histogram of payment settled amounts",
         );
-        let histogram = prometheus::HistogramVec::new(histogram_opts, &[]).unwrap();
+        let histogram = prometheus::Histogram::with_opts(histogram_opts).unwrap();
 
         register(Box::new(histogram.clone())).unwrap();
 
@@ -71,12 +71,12 @@ lazy_static! {
     };
     static ref PAYMENT_SETTLED_FEE: prometheus::IntCounter =
         make_intcounter("payment_settled_fee_amount", "Payment settled fee amount");
-    static ref PAYMENT_SETTLED_FEE_HISTO: prometheus::HistogramVec = {
+    static ref PAYMENT_SETTLED_FEE_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
             "payment_settled_fee_amount",
             "Histogram of payment settled fee amounts",
         );
-        let histogram = prometheus::HistogramVec::new(histogram_opts, &[]).unwrap();
+        let histogram = prometheus::Histogram::with_opts(histogram_opts).unwrap();
 
         register(Box::new(histogram.clone())).unwrap();
 
@@ -579,13 +579,9 @@ impl BeanCounter {
         })?;
 
         PAYMENT_ADDED.inc_by(i64::from(payment_cents));
-        PAYMENT_ADDED_HISTO
-            .with_label_values(&[])
-            .observe(f64::from(payment_cents));
+        PAYMENT_ADDED_HISTO.observe(f64::from(payment_cents));
         PAYMENT_ADDED_FEE.inc_by(i64::from(fee_cents));
-        PAYMENT_ADDED_FEE_HISTO
-            .with_label_values(&[])
-            .observe(f64::from(fee_cents));
+        PAYMENT_ADDED_FEE_HISTO.observe(f64::from(fee_cents));
 
         Ok(AddPaymentResponse {
             result: add_payment_response::Result::Success as i32,
@@ -647,13 +643,9 @@ impl BeanCounter {
             })?;
 
         PAYMENT_SETTLED.inc_by(i64::from(payment_amount_after_fee));
-        PAYMENT_SETTLED_HISTO
-            .with_label_values(&[])
-            .observe(f64::from(payment_amount_after_fee));
+        PAYMENT_SETTLED_HISTO.observe(f64::from(payment_amount_after_fee));
         PAYMENT_SETTLED_FEE.inc_by(i64::from(payment_amount_after_fee));
-        PAYMENT_SETTLED_FEE_HISTO
-            .with_label_values(&[])
-            .observe(f64::from(fee_amount));
+        PAYMENT_SETTLED_FEE_HISTO.observe(f64::from(fee_amount));
 
         Ok(SettlePaymentResponse {
             fee_cents: fee_amount,
