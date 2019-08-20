@@ -579,9 +579,13 @@ impl BeanCounter {
         })?;
 
         PAYMENT_ADDED.inc_by(i64::from(payment_cents));
-        PAYMENT_ADDED_HISTO.observe(f64::from(payment_cents));
+        PAYMENT_ADDED_HISTO
+            .local()
+            .observe(f64::from(payment_cents));
         PAYMENT_ADDED_FEE.inc_by(i64::from(fee_cents));
-        PAYMENT_ADDED_FEE_HISTO.observe(f64::from(fee_cents));
+        PAYMENT_ADDED_FEE_HISTO
+            .local()
+            .observe(f64::from(fee_cents));
 
         Ok(AddPaymentResponse {
             result: add_payment_response::Result::Success as i32,
@@ -643,9 +647,13 @@ impl BeanCounter {
             })?;
 
         PAYMENT_SETTLED.inc_by(i64::from(payment_amount_after_fee));
-        PAYMENT_SETTLED_HISTO.observe(f64::from(payment_amount_after_fee));
+        PAYMENT_SETTLED_HISTO
+            .local()
+            .observe(f64::from(payment_amount_after_fee));
         PAYMENT_SETTLED_FEE.inc_by(i64::from(payment_amount_after_fee));
-        PAYMENT_SETTLED_FEE_HISTO.observe(f64::from(fee_amount));
+        PAYMENT_SETTLED_FEE_HISTO
+            .local()
+            .observe(f64::from(fee_amount));
 
         Ok(SettlePaymentResponse {
             fee_cents: fee_amount,
