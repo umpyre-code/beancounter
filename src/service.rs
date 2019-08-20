@@ -42,7 +42,7 @@ lazy_static! {
         make_intcounter("payment_added_cent", "Payment added amount in cents");
     static ref PAYMENT_ADDED_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
-            "payment_added_cents",
+            "payment_added_cents_histo",
             "Histogram of payment added amounts in cents",
         )
         .buckets(PAYMENT_FEE_HISTO_BUCKETS.to_vec());
@@ -58,7 +58,7 @@ lazy_static! {
     );
     static ref PAYMENT_ADDED_FEE_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
-            "payment_added_fee_cents",
+            "payment_added_fee_cents_histo",
             "Histogram of payment added fee amounts in cents",
         )
         .buckets(PAYMENT_FEE_HISTO_BUCKETS.to_vec());
@@ -72,7 +72,7 @@ lazy_static! {
         make_intcounter("payment_settled_cents", "Payment settled amount in cents");
     static ref PAYMENT_SETTLED_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
-            "payment_settled_cents",
+            "payment_settled_cents_histo",
             "Histogram of payment settled amounts in cents",
         )
         .buckets(PAYMENT_HISTO_BUCKETS.to_vec());
@@ -88,7 +88,7 @@ lazy_static! {
     );
     static ref PAYMENT_SETTLED_FEE_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
-            "payment_settled_fee_cents",
+            "payment_settled_fee_cents_histo",
             "Histogram of payment settled fee amounts",
         )
         .buckets(PAYMENT_FEE_HISTO_BUCKETS.to_vec());
@@ -595,9 +595,9 @@ impl BeanCounter {
         })?;
 
         PAYMENT_ADDED.inc_by(i64::from(payment_cents));
-        // PAYMENT_ADDED_HISTO.observe(f64::from(payment_cents));
+        PAYMENT_ADDED_HISTO.observe(f64::from(payment_cents));
         PAYMENT_ADDED_FEE.inc_by(i64::from(fee_cents));
-        // PAYMENT_ADDED_FEE_HISTO.observe(f64::from(fee_cents));
+        PAYMENT_ADDED_FEE_HISTO.observe(f64::from(fee_cents));
 
         Ok(AddPaymentResponse {
             result: add_payment_response::Result::Success as i32,
@@ -659,9 +659,9 @@ impl BeanCounter {
             })?;
 
         PAYMENT_SETTLED.inc_by(i64::from(payment_amount_after_fee));
-        // PAYMENT_SETTLED_HISTO.observe(f64::from(payment_amount_after_fee));
+        PAYMENT_SETTLED_HISTO.observe(f64::from(payment_amount_after_fee));
         PAYMENT_SETTLED_FEE.inc_by(i64::from(payment_amount_after_fee));
-        // PAYMENT_SETTLED_FEE_HISTO.observe(f64::from(fee_amount));
+        PAYMENT_SETTLED_FEE_HISTO.observe(f64::from(fee_amount));
 
         Ok(SettlePaymentResponse {
             fee_cents: fee_amount,
