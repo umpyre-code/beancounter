@@ -41,7 +41,7 @@ const PAYMENT_FEE_HISTO_BUCKETS: &[f64; 15] = &[
 
 lazy_static! {
     static ref PAYMENT_ADDED: prometheus::IntCounter =
-        make_intcounter("payment_added_cents", "Payment added amount in cents");
+        make_intcounter("payment_added_cents_total", "Payment added amount in cents");
     static ref PAYMENT_ADDED_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
             "payment_added_cents_histo",
@@ -55,7 +55,7 @@ lazy_static! {
         histogram
     };
     static ref PAYMENT_ADDED_FEE: prometheus::IntCounter = make_intcounter(
-        "payment_added_fee_cents",
+        "payment_added_fee_cents_total",
         "Payment added fee amount in cents"
     );
     static ref PAYMENT_ADDED_FEE_HISTO: prometheus::Histogram = {
@@ -70,8 +70,10 @@ lazy_static! {
 
         histogram
     };
-    static ref PAYMENT_SETTLED: prometheus::IntCounter =
-        make_intcounter("payment_settled_cents", "Payment settled amount in cents");
+    static ref PAYMENT_SETTLED: prometheus::IntCounter = make_intcounter(
+        "payment_settled_cents_total",
+        "Payment settled amount in cents"
+    );
     static ref PAYMENT_SETTLED_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
             "payment_settled_cents_histo",
@@ -85,7 +87,7 @@ lazy_static! {
         histogram
     };
     static ref PAYMENT_SETTLED_FEE: prometheus::IntCounter = make_intcounter(
-        "payment_settled_fee_cents",
+        "payment_settled_fee_cents_total",
         "Payment settled fee amount in cents"
     );
     static ref PAYMENT_SETTLED_FEE_HISTO: prometheus::Histogram = {
