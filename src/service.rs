@@ -45,7 +45,7 @@ lazy_static! {
             "payment_added_cents_histo",
             "Histogram of payment added amounts in cents",
         )
-        .buckets(PAYMENT_FEE_HISTO_BUCKETS.to_vec());
+        .buckets(PAYMENT_HISTO_BUCKETS.to_vec());
         let histogram = prometheus::Histogram::with_opts(histogram_opts).unwrap();
 
         register(Box::new(histogram.clone())).unwrap();
