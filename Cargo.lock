@@ -697,7 +697,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "instrumented"
 version = "0.1.0"
-source = "git+ssh://git@github.com/umpyre-code/instrumented.git#32a840514a48c4ca240c5dba3152738e0fb2b9d3"
+source = "git+ssh://git@github.com/umpyre-code/instrumented.git#422851cb8f4ee42c9a764e0c4ecb0160e78cf5d4"
 dependencies = [
  "hyper 0.12.33 (registry+https://github.com/rust-lang/crates.io-index)",
  "instrumented-codegen 0.1.0 (git+ssh://git@github.com/umpyre-code/instrumented.git)",
@@ -710,7 +710,7 @@ dependencies = [
 [[package]]
 name = "instrumented-codegen"
 version = "0.1.0"
-source = "git+ssh://git@github.com/umpyre-code/instrumented.git#32a840514a48c4ca240c5dba3152738e0fb2b9d3"
+source = "git+ssh://git@github.com/umpyre-code/instrumented.git#422851cb8f4ee42c9a764e0c4ecb0160e78cf5d4"
 dependencies = [
  "darling 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "proc-macro2 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
