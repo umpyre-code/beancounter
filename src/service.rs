@@ -29,14 +29,14 @@ fn make_intcounter(name: &str, description: &str) -> prometheus::IntCounter {
     counter
 }
 
-const PAYMENT_HISTO_BUCKETS: &[f64; 20] = &[
-    100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 750.0, 1000.0, 1250.0, 1500.0, 2000.0, 3000.0,
-    5000.0, 10000.0, 50000.0, 75000.0, 100000.0, 200000.0, 300000.0, 500000.0,
+const PAYMENT_HISTO_BUCKETS: &[f64; 21] = &[
+    1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.5, 15.0, 20.0, 30.0, 50.0, 100.0, 250.0,
+    500.0, 750.0, 1000.0, 2000.0,
 ];
 
-const PAYMENT_FEE_HISTO_BUCKETS: &[f64; 20] = &[
-    10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 75.0, 100.0, 125.0, 150.0, 200.0, 300.0, 500.0, 1000.0,
-    5000.0, 7500.0, 10000.0, 20000.0, 30000.0, 50000.0,
+const PAYMENT_FEE_HISTO_BUCKETS: &[f64; 21] = &[
+    0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.50, 2.0, 3.0, 5.0, 10.0, 25.0, 50.0,
+    75.0, 100.0, 200.0,
 ];
 
 lazy_static! {
@@ -44,7 +44,7 @@ lazy_static! {
         make_intcounter("payment_added_cents_total", "Payment added amount in cents");
     static ref PAYMENT_ADDED_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
-            "payment_added_cents_histo",
+            "payment_added_dollars_histo",
             "Histogram of payment added amounts in cents",
         )
         .buckets(PAYMENT_HISTO_BUCKETS.to_vec());
@@ -60,7 +60,7 @@ lazy_static! {
     );
     static ref PAYMENT_ADDED_FEE_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
-            "payment_added_fee_cents_histo",
+            "payment_added_fee_dollars_histo",
             "Histogram of payment added fee amounts in cents",
         )
         .buckets(PAYMENT_FEE_HISTO_BUCKETS.to_vec());
@@ -76,7 +76,7 @@ lazy_static! {
     );
     static ref PAYMENT_SETTLED_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
-            "payment_settled_cents_histo",
+            "payment_settled_dollars_histo",
             "Histogram of payment settled amounts in cents",
         )
         .buckets(PAYMENT_HISTO_BUCKETS.to_vec());
@@ -92,7 +92,7 @@ lazy_static! {
     );
     static ref PAYMENT_SETTLED_FEE_HISTO: prometheus::Histogram = {
         let histogram_opts = prometheus::HistogramOpts::new(
-            "payment_settled_fee_cents_histo",
+            "payment_settled_fee_dollars_histo",
             "Histogram of payment settled fee amounts",
         )
         .buckets(PAYMENT_FEE_HISTO_BUCKETS.to_vec());
@@ -599,9 +599,9 @@ impl BeanCounter {
         })?;
 
         PAYMENT_ADDED.inc_by(i64::from(payment_cents));
-        PAYMENT_ADDED_HISTO.observe(f64::from(payment_cents));
+        PAYMENT_ADDED_HISTO.observe(f64::from(payment_cents) / 100.0);
         PAYMENT_ADDED_FEE.inc_by(i64::from(fee_cents));
-        PAYMENT_ADDED_FEE_HISTO.observe(f64::from(fee_cents));
+        PAYMENT_ADDED_FEE_HISTO.observe(f64::from(fee_cents) / 100.0);
 
         Ok(AddPaymentResponse {
             result: add_payment_response::Result::Success as i32,
@@ -663,9 +663,9 @@ impl BeanCounter {
             })?;
 
         PAYMENT_SETTLED.inc_by(i64::from(payment_amount_after_fee));
-        PAYMENT_SETTLED_HISTO.observe(f64::from(payment_amount_after_fee));
+        PAYMENT_SETTLED_HISTO.observe(f64::from(payment_amount_after_fee) / 100.0);
         PAYMENT_SETTLED_FEE.inc_by(i64::from(payment_amount_after_fee));
-        PAYMENT_SETTLED_FEE_HISTO.observe(f64::from(fee_amount));
+        PAYMENT_SETTLED_FEE_HISTO.observe(f64::from(fee_amount) / 100.0);
 
         Ok(SettlePaymentResponse {
             fee_cents: fee_amount,
