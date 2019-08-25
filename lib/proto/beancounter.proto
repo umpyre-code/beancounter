@@ -153,6 +153,9 @@ message SettlePaymentResponse {
   int32 payment_cents = 2;
   // Updated balance
   Balance balance = 3;
+  // Updated RAL. If there's an error calculating the RAL, this value will be
+  // -1.
+  int32 ral = 4;
 }
 
 message GetBalanceRequest { string client_id = 1; }

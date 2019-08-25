@@ -39,6 +39,11 @@ const PAYMENT_FEE_HISTO_BUCKETS: &[f64; 21] = &[
     75.0, 100.0, 200.0,
 ];
 
+const RAL_HISTO_BUCKETS: &[f64; 21] = &[
+    0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.50, 2.0, 3.0, 5.0, 10.0, 25.0, 50.0,
+    75.0, 100.0, 200.0,
+];
+
 lazy_static! {
     static ref PAYMENT_ADDED: prometheus::IntCounter =
         make_intcounter("payment_added_cents_total", "Payment added amount in cents");
@@ -96,6 +101,16 @@ lazy_static! {
             "Histogram of payment settled fee amounts",
         )
         .buckets(PAYMENT_FEE_HISTO_BUCKETS.to_vec());
+        let histogram = prometheus::Histogram::with_opts(histogram_opts).unwrap();
+
+        register(Box::new(histogram.clone())).unwrap();
+
+        histogram
+    };
+    static ref RAL_HISTO: prometheus::Histogram = {
+        let histogram_opts =
+            prometheus::HistogramOpts::new("ral_dollars_histo", "Histogram of RAL amounts")
+                .buckets(RAL_HISTO_BUCKETS.to_vec());
         let histogram = prometheus::Histogram::with_opts(histogram_opts).unwrap();
 
         register(Box::new(histogram.clone())).unwrap();
@@ -327,6 +342,12 @@ fn update_and_return_balance(
             withdrawable_cents: withdrawable_cents_remaining,
         })
         .get_result(conn)?)
+}
+
+#[derive(Debug, QueryableByName)]
+pub struct RalQueryResult {
+    #[sql_type = "diesel::sql_types::Double"]
+    pub ral: f64,
 }
 
 #[instrument(INFO)]
@@ -623,6 +644,7 @@ impl BeanCounter {
         use data_encoding::BASE64URL_NOPAD;
         use diesel::prelude::*;
         use diesel::result::Error;
+        use diesel::sql_query;
         use uuid::Uuid;
 
         let client_uuid_to = Uuid::parse_str(&request.client_id)?;
@@ -662,6 +684,46 @@ impl BeanCounter {
                 Ok((payment_amount_after_fee, fee_amount, balance))
             })?;
 
+        // Calculate the RAL
+        let conn = self.db_reader.get().unwrap();
+        let result: Result<Vec<RalQueryResult>, Error> = sql_query(
+            r#"
+                SELECT
+                CASE WHEN Count(1) = 0 THEN 0 ELSE Sum(s1.amount_cents) :: FLOAT / Count(1) END AS ral
+                FROM
+                (
+                    SELECT
+                        t.amount_cents
+                    FROM
+                        transactions AS t
+                    WHERE
+                        t.client_id = ?
+                        AND t.tx_type = 'credit'
+                        AND t.tx_reason = 'message_read'
+                    ORDER BY
+                        t.created_at DESC
+                    LIMIT
+                        10
+                ) AS s1
+           "#,
+        )
+        .bind::<diesel::pg::types::sql_types::Uuid, Uuid>(client_uuid_to)
+        .load(&conn);
+        let ral = match result {
+            Ok(result) => {
+                if result.len() > 0 {
+                    // convert from cents to dollars
+                    let ral = result[0].ral / 100.0;
+                    RAL_HISTO.observe(ral);
+                    // round to nearest dollar
+                    ral.round() as i32
+                } else {
+                    -1
+                }
+            }
+            Err(_) => -1,
+        };
+
         PAYMENT_SETTLED.inc_by(i64::from(payment_amount_after_fee));
         PAYMENT_SETTLED_HISTO.observe(f64::from(payment_amount_after_fee) / 100.0);
         PAYMENT_SETTLED_FEE.inc_by(i64::from(payment_amount_after_fee));
@@ -671,6 +733,7 @@ impl BeanCounter {
             fee_cents: fee_amount,
             payment_cents: payment_amount_after_fee,
             balance: Some(balance.into()),
+            ral: ral,
         })
     }
 
