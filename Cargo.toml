@@ -40,3 +40,6 @@ yansi = "0.5"
 
 [dev-dependencies]
 rand = "0.7"
+
+[patch.crates-io]
+prometheus = { git = "https://github.com/brndnmtthws/rust-prometheus.git", branch = "superbranch" }
