@@ -325,8 +325,7 @@ fn update_and_return_balance(
         .first::<Option<i64>>(conn)?
         .unwrap_or_else(|| 0);
 
-    let withdrawable_cents_remaining =
-        std::cmp::min(balance_cents_remaining, payments_sum - withdrawn_sum);
+    let withdrawable_cents_remaining = (credit_sum + payments_sum) - (debit_sum + withdrawn_sum);
 
     Ok(insert_into(balances)
         .values(&NewBalance {
