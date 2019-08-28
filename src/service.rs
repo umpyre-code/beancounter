@@ -708,7 +708,7 @@ impl BeanCounter {
                 ) AS s1
            "#,
         )
-        .bind::<diesel::pg::types::sql_types::Uuid, Uuid>(client_uuid_to)
+        .bind::<diesel::pg::types::sql_types::Uuid, _>(client_uuid_to)
         .load(&conn);
         let ral = match result {
             Ok(result) => {
@@ -722,7 +722,10 @@ impl BeanCounter {
                     -1
                 }
             }
-            Err(_) => -1,
+            Err(err) => {
+                error!("couldn't update RAL: {:?}", err);
+                -1
+            }
         };
 
         PAYMENT_SETTLED.inc_by(i64::from(payment_amount_after_fee));
