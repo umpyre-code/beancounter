@@ -698,7 +698,7 @@ impl BeanCounter {
                     FROM
                         transactions AS t
                     WHERE
-                        t.client_id = ?
+                        t.client_id = $1
                         AND t.tx_type = 'credit'
                         AND t.tx_reason = 'message_read'
                     ORDER BY
