@@ -709,7 +709,7 @@ impl BeanCounter {
            "#,
         )
         .bind::<diesel::pg::types::sql_types::Uuid, _>(client_uuid_to)
-        .load(&conn);
+        .get_results(&conn);
         let ral = match result {
             Ok(result) => {
                 if result.len() > 0 {
