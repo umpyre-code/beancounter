@@ -20,8 +20,8 @@ use crate::stripe_client;
 static MAX_PAYMENT_AMOUNT: i32 = 97_099_969;
 
 // Umpyre fees
-static UMPYRE_MESSAGE_SEND_FEE: f64 = 0.15; // 15%
-static UMPYRE_MESSAGE_READ_FEE: f64 = 0.15; // 15%
+static UMPYRE_MESSAGE_SEND_FEE: f64 = 0.03; // 3%
+static UMPYRE_MESSAGE_READ_FEE: f64 = 0.07; // 7%
 
 fn make_intcounter(name: &str, description: &str) -> prometheus::IntCounter {
     let counter = prometheus::IntCounter::new(name, description).unwrap();
