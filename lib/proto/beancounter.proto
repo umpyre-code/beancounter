@@ -1,0 +1,219 @@
+syntax = "proto3";
+
+package beancounter;
+option java_package = "beancounter";
+
+service BeanCounter {
+  // Get account balances
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+
+  // Get transactions
+  rpc GetTransactions(GetTransactionsRequest) returns (GetTransactionsResponse);
+
+  // Add a message payment
+  rpc AddPayment(AddPaymentRequest) returns (AddPaymentResponse);
+
+  // Settle a message payment
+  rpc SettlePayment(SettlePaymentRequest) returns (SettlePaymentResponse);
+
+  // Add credits
+  rpc AddCredits(AddCreditsRequest) returns (AddCreditsResponse);
+
+  // Withdraw credits via Stripe Connect transfer (payout)
+  rpc ConnectPayout(ConnectPayoutRequest) returns (ConnectPayoutResponse);
+
+  // Create a stripe charge
+  rpc StripeCharge(StripeChargeRequest) returns (StripeChargeResponse);
+
+  // Complete the Stripe Connect oauth flow
+  rpc CompleteConnectOauth(CompleteConnectOauthRequest)
+      returns (CompleteConnectOauthResponse);
+
+  // Get the current connect account details
+  rpc GetConnectAccount(GetConnectAccountRequest)
+      returns (GetConnectAccountResponse);
+
+  // Update account preferences (i.e., payout prefs)
+  rpc UpdateConnectAccountPrefs(UpdateConnectAccountPrefsRequest)
+      returns (UpdateConnectAccountPrefsResponse);
+
+  // Health check endpoint
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message Timestamp {
+  // Represents seconds of UTC time since Unix epoch
+  // 1970-01-01T00:00:00Z. Must be from 0001-01-01T00:00:00Z to
+  // 9999-12-31T23:59:59Z inclusive.
+  int64 seconds = 1;
+
+  // Non-negative fractions of a second at nanosecond resolution. Negative
+  // second values with fractions must still have non-negative nanos values
+  // that count forward in time. Must be from 0 to 999,999,999
+  // inclusive.
+  int32 nanos = 2;
+}
+
+message ConnectAccountPrefs {
+  bool enable_automatic_payouts = 1;
+  int64 automatic_payout_threshold_cents = 2;
+}
+
+message UpdateConnectAccountPrefsRequest {
+  string client_id = 1;
+  ConnectAccountPrefs preferences = 2;
+}
+
+message UpdateConnectAccountPrefsResponse {
+  string client_id = 1;
+  ConnectAccountInfo connect_account = 2;
+}
+
+message ConnectAccountInfo {
+  enum State {
+    ACTIVE = 0;
+    INACTIVE = 1;
+  }
+  State state = 1;
+  oneof connect {
+    string login_link_url = 2;
+    string oauth_url = 3;
+  }
+  ConnectAccountPrefs preferences = 4;
+}
+
+message CompleteConnectOauthRequest {
+  string client_id = 1;
+  string authorization_code = 2;
+  string oauth_state = 3;
+}
+
+message CompleteConnectOauthResponse {
+  string client_id = 1;
+  ConnectAccountInfo connect_account = 2;
+}
+
+message GetConnectAccountRequest { string client_id = 1; }
+
+message GetConnectAccountResponse {
+  string client_id = 1;
+  ConnectAccountInfo connect_account = 2;
+}
+
+message AddCreditsRequest {
+  string client_id = 1;
+  int32 amount_cents = 2;
+}
+message AddCreditsResponse { Balance balance = 1; }
+
+message ConnectPayoutRequest {
+  string client_id = 1;
+  int32 amount_cents = 2;
+}
+message ConnectPayoutResponse {
+  enum Result {
+    SUCCESS = 0;
+    INSUFFICIENT_BALANCE = 1;
+    INVALID_AMOUNT = 2;
+  }
+  Result result = 1;
+  string client_id = 2;
+  Balance balance = 3;
+}
+
+message AddPaymentRequest {
+  string client_id_from = 1;
+  string client_id_to = 2;
+  bytes message_hash = 3;
+  int32 payment_cents = 4;
+}
+message AddPaymentResponse {
+  enum Result {
+    SUCCESS = 0;
+    INSUFFICIENT_BALANCE = 1;
+    INVALID_AMOUNT = 2;
+  }
+  Result result = 1;
+  // The non-refundable Umpyre fee
+  int32 fee_cents = 2;
+  // The payment amount
+  int32 payment_cents = 3;
+  // Remaining balance for client_id_from
+  Balance balance = 4;
+}
+
+message SettlePaymentRequest {
+  string client_id = 1;
+  bytes message_hash = 2;
+}
+message SettlePaymentResponse {
+  // The fee collected by Umpyre
+  int32 fee_cents = 1;
+  // The payout amount
+  int32 payment_cents = 2;
+  // Updated balance
+  Balance balance = 3;
+  // Updated RAL. If there's an error calculating the RAL, this value will be
+  // -1.
+  int32 ral = 4;
+}
+
+message GetBalanceRequest { string client_id = 1; }
+message GetBalanceResponse { Balance balance = 1; }
+
+message Transaction {
+  enum Type {
+    DEBIT = 0;
+    CREDIT = 1;
+    PROMO_CREDIT = 2;
+  }
+  enum Reason {
+    MESSAGE_READ = 0;
+    MESSAGE_UNREAD = 1;
+    MESSAGE_SENT = 2;
+    CREDIT_ADDED = 3;
+    PAYOUT = 4;
+  }
+  Timestamp created_at = 1;
+  Type tx_type = 2;
+  Type tx_reason = 3;
+  string client_id = 4;
+  int32 amount_cents = 5;
+}
+
+message Balance {
+  string client_id = 1;
+  int64 balance_cents = 2;
+  int64 promo_cents = 3;
+  int64 withdrawable_cents = 4;
+}
+
+message GetTransactionsRequest { string client_id = 1; }
+message GetTransactionsResponse { repeated Transaction transactions = 1; }
+
+message StripeChargeRequest {
+  string client_id = 1;
+  int32 amount_cents = 2;
+  string token = 3;
+}
+message StripeChargeResponse {
+  enum Result {
+    SUCCESS = 0;
+    FAILURE = 1;
+  }
+  Result result = 1;
+  string api_response = 2;
+  string message = 3;
+  Balance balance = 4;
+}
+
+message HealthCheckRequest { string service = 1; }
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+  }
+  ServingStatus status = 1;
+}

@@ -1,0 +1,7 @@
+CREATE TABLE stripe_charges (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  client_id UUID UNIQUE NOT NULL,
+  token JSON NOT NULL,
+  charge JSON NOT NULL)

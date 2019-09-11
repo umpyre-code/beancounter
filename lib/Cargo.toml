@@ -1,0 +1,15 @@
+[package]
+name = "beancounter-grpc"
+version = "0.1.0"
+authors = ["Brenden Matthews <brenden@brndn.io>"]
+edition = "2018"
+
+[dependencies]
+bytes = "0.4"
+chrono = "0.4"
+prost = "0.5"
+tower-grpc = "0.1"
+tower-hyper = "0.1"
+
+[build-dependencies]
+tower-grpc-build = { version = "0.1", features = ["tower-hyper"] }
