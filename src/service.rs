@@ -616,24 +616,46 @@ impl BeanCounter {
                 // Zero value payments are perfectly valid; they simply don't generate
                 // a TX
                 if total_amount > 0 {
-                    // Credit the cash account, debit the sender. This TX is
-                    // refundable.
-                    add_transaction(
-                        None,
-                        Some(client_uuid_from),
-                        payment_cents,
-                        TransactionReason::MessageSent,
-                        &conn,
-                    )?;
+                    // is there a promo balance? use that first
+                    if balance.promo_cents >= i64::from(total_amount) {
+                        // Credit the cash account, debit the sender. This TX is
+                        // refundable.
+                        add_promo_transaction(
+                            None,
+                            Some(client_uuid_from),
+                            payment_cents,
+                            TransactionReason::MessageSent,
+                            &conn,
+                        )?;
 
-                    // Credit the cash account, debit the sender. This TX is non-refundable.
-                    add_transaction(
-                        None,
-                        Some(client_uuid_from),
-                        fee_cents,
-                        TransactionReason::MessageSent,
-                        &conn,
-                    )?;
+                        // Credit the cash account, debit the sender. This TX is non-refundable.
+                        add_promo_transaction(
+                            None,
+                            Some(client_uuid_from),
+                            fee_cents,
+                            TransactionReason::MessageSent,
+                            &conn,
+                        )?;
+                    } else {
+                        // Credit the cash account, debit the sender. This TX is
+                        // refundable.
+                        add_transaction(
+                            None,
+                            Some(client_uuid_from),
+                            payment_cents,
+                            TransactionReason::MessageSent,
+                            &conn,
+                        )?;
+
+                        // Credit the cash account, debit the sender. This TX is non-refundable.
+                        add_transaction(
+                            None,
+                            Some(client_uuid_from),
+                            fee_cents,
+                            TransactionReason::MessageSent,
+                            &conn,
+                        )?;
+                    }
                 }
 
                 // Finally, create a payment record.
