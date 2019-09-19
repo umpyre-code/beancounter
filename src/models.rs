@@ -68,6 +68,7 @@ pub struct Payment {
     pub client_id_to: Uuid,
     pub payment_cents: i32,
     pub message_hash: String,
+    pub is_promo: bool,
 }
 
 #[derive(Insertable)]
@@ -77,6 +78,7 @@ pub struct NewPayment {
     pub client_id_to: Uuid,
     pub payment_cents: i32,
     pub message_hash: String,
+    pub is_promo: bool,
 }
 
 #[derive(Queryable, Identifiable)]

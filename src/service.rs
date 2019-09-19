@@ -179,6 +179,7 @@ impl From<&models::Transaction> for Transaction {
                 TransactionType::Credit => transaction::Type::Credit,
                 TransactionType::PromoCredit => transaction::Type::PromoCredit,
                 TransactionType::Debit => transaction::Type::Debit,
+                TransactionType::PromoDebit => transaction::Type::PromoDebit,
             } as i32,
             tx_reason: match tx.tx_reason {
                 TransactionReason::MessageRead => transaction::Reason::MessageRead,
@@ -388,6 +389,43 @@ pub fn add_transaction(
     Ok((tx_credit, tx_debit))
 }
 
+#[instrument(INFO)]
+pub fn add_promo_transaction(
+    client_id_credit: Option<uuid::Uuid>,
+    client_id_debit: Option<uuid::Uuid>,
+    amount_cents: i32,
+    reason: sql_types::TransactionReason,
+    conn: &diesel::r2d2::PooledConnection<diesel::r2d2::ConnectionManager<diesel::PgConnection>>,
+) -> Result<(models::Transaction, models::Transaction), diesel::result::Error> {
+    use crate::models::*;
+    use crate::sql_types::*;
+    use diesel::prelude::*;
+    use schema::transactions::table as transactions;
+
+    let tx_credit = NewTransaction {
+        client_id: client_id_credit,
+        tx_type: TransactionType::PromoCredit,
+        tx_reason: reason,
+        amount_cents,
+    };
+    let tx_debit = NewTransaction {
+        client_id: client_id_debit,
+        tx_type: TransactionType::PromoDebit,
+        tx_reason: reason,
+        amount_cents: -amount_cents, // Debits should be negative
+    };
+
+    let tx_credit = diesel::insert_into(transactions)
+        .values(&tx_credit)
+        .get_result::<Transaction>(conn)?;
+
+    let tx_debit = diesel::insert_into(transactions)
+        .values(&tx_debit)
+        .get_result::<Transaction>(conn)?;
+
+    Ok((tx_credit, tx_debit))
+}
+
 impl BeanCounter {
     pub fn new(
         db_reader: diesel::r2d2::Pool<diesel::r2d2::ConnectionManager<diesel::pg::PgConnection>>,
@@ -558,79 +596,109 @@ impl BeanCounter {
         let client_uuid_from = Uuid::parse_str(&request.client_id_from)?;
         let client_uuid_to = Uuid::parse_str(&request.client_id_to)?;
 
-        let payment_cents = request.payment_cents;
-        let fee_cents = (f64::from(payment_cents) * UMPYRE_MESSAGE_SEND_FEE).round() as i32;
-        let total_amount = payment_cents + fee_cents;
+        // if this is _not_ a promo
+        if !request.is_promo {
+            let payment_cents = request.payment_cents;
+            let fee_cents = (f64::from(payment_cents) * UMPYRE_MESSAGE_SEND_FEE).round() as i32;
+            let total_amount = payment_cents + fee_cents;
 
-        // Any payment over this amount will never go through
-        if total_amount >= MAX_PAYMENT_AMOUNT {
-            return Ok(AddPaymentResponse {
-                result: add_payment_response::Result::InvalidAmount as i32,
-                payment_cents: 0,
-                fee_cents: 0,
-                balance: None,
-            });
-        }
-
-        let conn = self.db_writer.get().unwrap();
-        // Check the sender balance, make sure it's sufficient.
-        let balance = self.get_balance(client_uuid_from)?;
-        if balance.balance_cents + balance.promo_cents < i64::from(total_amount) {
-            return Ok(AddPaymentResponse {
-                result: add_payment_response::Result::InsufficientBalance as i32,
-                payment_cents: 0,
-                fee_cents: 0,
-                balance: Some(balance.into()),
-            });
-        }
-
-        let balance = conn.transaction::<Balance, Error, _>(|| {
-            // Zero value payments are perfectly valid; they simply don't generate
-            // a TX
-            if total_amount > 0 {
-                // Credit the cash account, debit the sender. This TX is
-                // refundable.
-                add_transaction(
-                    None,
-                    Some(client_uuid_from),
-                    payment_cents,
-                    TransactionReason::MessageSent,
-                    &conn,
-                )?;
-
-                // Credit the cash account, debit the sender. This TX is non-refundable.
-                add_transaction(
-                    None,
-                    Some(client_uuid_from),
-                    fee_cents,
-                    TransactionReason::MessageSent,
-                    &conn,
-                )?;
+            // Any payment over this amount will never go through
+            if total_amount >= MAX_PAYMENT_AMOUNT {
+                return Ok(AddPaymentResponse {
+                    result: add_payment_response::Result::InvalidAmount as i32,
+                    payment_cents: 0,
+                    fee_cents: 0,
+                    balance: None,
+                });
             }
 
-            // Finally, create a payment record.
-            let payment = NewPayment {
-                client_id_from: client_uuid_from,
-                client_id_to: client_uuid_to,
+            let conn = self.db_writer.get().unwrap();
+
+            // Check the sender balance, make sure it's sufficient.
+            let balance = self.get_balance(client_uuid_from)?;
+            if balance.balance_cents + balance.promo_cents < i64::from(total_amount) {
+                return Ok(AddPaymentResponse {
+                    result: add_payment_response::Result::InsufficientBalance as i32,
+                    payment_cents: 0,
+                    fee_cents: 0,
+                    balance: Some(balance.into()),
+                });
+            }
+
+            let balance = conn.transaction::<Balance, Error, _>(|| {
+                // Zero value payments are perfectly valid; they simply don't generate
+                // a TX
+                if total_amount > 0 {
+                    // Credit the cash account, debit the sender. This TX is
+                    // refundable.
+                    add_transaction(
+                        None,
+                        Some(client_uuid_from),
+                        payment_cents,
+                        TransactionReason::MessageSent,
+                        &conn,
+                    )?;
+
+                    // Credit the cash account, debit the sender. This TX is non-refundable.
+                    add_transaction(
+                        None,
+                        Some(client_uuid_from),
+                        fee_cents,
+                        TransactionReason::MessageSent,
+                        &conn,
+                    )?;
+                }
+
+                // Finally, create a payment record.
+                let payment = NewPayment {
+                    client_id_from: client_uuid_from,
+                    client_id_to: client_uuid_to,
+                    payment_cents,
+                    message_hash: BASE64URL_NOPAD.encode(&request.message_hash),
+                    is_promo: false,
+                };
+                insert_into(payments).values(&payment).execute(&conn)?;
+
+                Ok(update_and_return_balance(client_uuid_from, &conn)?)
+            })?;
+
+            PAYMENT_ADDED.inc_by(i64::from(payment_cents));
+            PAYMENT_ADDED_HISTO.observe(f64::from(payment_cents) / 100.0);
+            PAYMENT_ADDED_FEE.inc_by(i64::from(fee_cents));
+            PAYMENT_ADDED_FEE_HISTO.observe(f64::from(fee_cents) / 100.0);
+
+            Ok(AddPaymentResponse {
+                result: add_payment_response::Result::Success as i32,
                 payment_cents,
-                message_hash: BASE64URL_NOPAD.encode(&request.message_hash),
-            };
-            insert_into(payments).values(&payment).execute(&conn)?;
+                fee_cents,
+                balance: Some(balance.into()),
+            })
+        } else {
+            // this _is_ a promo
+            let payment_cents = request.payment_cents;
+            let conn = self.db_writer.get().unwrap();
 
-            Ok(update_and_return_balance(client_uuid_from, &conn)?)
-        })?;
+            let balance = conn.transaction::<Balance, Error, _>(|| {
+                // Finally, create a payment record.
+                let payment = NewPayment {
+                    client_id_from: client_uuid_from,
+                    client_id_to: client_uuid_to,
+                    payment_cents,
+                    message_hash: BASE64URL_NOPAD.encode(&request.message_hash),
+                    is_promo: true,
+                };
+                insert_into(payments).values(&payment).execute(&conn)?;
 
-        PAYMENT_ADDED.inc_by(i64::from(payment_cents));
-        PAYMENT_ADDED_HISTO.observe(f64::from(payment_cents) / 100.0);
-        PAYMENT_ADDED_FEE.inc_by(i64::from(fee_cents));
-        PAYMENT_ADDED_FEE_HISTO.observe(f64::from(fee_cents) / 100.0);
+                Ok(update_and_return_balance(client_uuid_from, &conn)?)
+            })?;
 
-        Ok(AddPaymentResponse {
-            result: add_payment_response::Result::Success as i32,
-            payment_cents,
-            fee_cents,
-            balance: Some(balance.into()),
-        })
+            Ok(AddPaymentResponse {
+                result: add_payment_response::Result::Success as i32,
+                payment_cents,
+                fee_cents: 0,
+                balance: Some(balance.into()),
+            })
+        }
     }
 
     #[instrument(INFO)]
@@ -650,44 +718,46 @@ impl BeanCounter {
 
         let client_uuid_to = Uuid::parse_str(&request.client_id)?;
 
-        let conn = self.db_writer.get().unwrap();
-        let (payment_amount_after_fee, fee_amount, balance) = conn
-            .transaction::<(i32, i32, Balance), Error, _>(|| {
-                let payment: Payment = payments
-                    .filter(
-                        client_id_to
-                            .eq(client_uuid_to)
-                            .and(message_hash.eq(BASE64URL_NOPAD.encode(&request.message_hash))),
-                    )
-                    .first(&conn)?;
-
-                // If there's a valid payment, perform settlement
-                let fee_amount =
-                    (f64::from(payment.payment_cents) * UMPYRE_MESSAGE_READ_FEE).round() as i32;
-                let payment_amount_after_fee = payment.payment_cents - fee_amount;
-
-                // Add TX from umpyre cash account to recipient
-                add_transaction(
-                    Some(payment.client_id_to),
-                    None,
-                    payment_amount_after_fee,
-                    TransactionReason::MessageRead,
-                    &conn,
-                )?;
-
-                // delete the payment
-                diesel::delete(payments)
-                    .filter(message_hash.eq(BASE64URL_NOPAD.encode(&request.message_hash)))
-                    .execute(&conn)?;
-
-                let balance = update_and_return_balance(payment.client_id_to, &conn)?;
-
-                Ok((payment_amount_after_fee, fee_amount, balance))
-            })?;
-
-        // Calculate the RAL
         let conn = self.db_reader.get().unwrap();
-        let result: Result<Vec<RalQueryResult>, Error> = sql_query(
+        let payment: Payment = payments
+            .filter(
+                client_id_to
+                    .eq(client_uuid_to)
+                    .and(message_hash.eq(BASE64URL_NOPAD.encode(&request.message_hash))),
+            )
+            .first(&conn)?;
+
+        let conn = self.db_writer.get().unwrap();
+        if !payment.is_promo {
+            let (payment_amount_after_fee, fee_amount, balance) = conn
+                .transaction::<(i32, i32, Balance), Error, _>(|| {
+                    // If there's a valid payment, perform settlement
+                    let fee_amount =
+                        (f64::from(payment.payment_cents) * UMPYRE_MESSAGE_READ_FEE).round() as i32;
+                    let payment_amount_after_fee = payment.payment_cents - fee_amount;
+
+                    // Add TX from umpyre cash account to recipient
+                    add_transaction(
+                        Some(payment.client_id_to),
+                        None,
+                        payment_amount_after_fee,
+                        TransactionReason::MessageRead,
+                        &conn,
+                    )?;
+
+                    // delete the payment
+                    diesel::delete(payments)
+                        .filter(message_hash.eq(BASE64URL_NOPAD.encode(&request.message_hash)))
+                        .execute(&conn)?;
+
+                    let balance = update_and_return_balance(payment.client_id_to, &conn)?;
+
+                    Ok((payment_amount_after_fee, fee_amount, balance))
+                })?;
+
+            // Calculate the RAL
+            let conn = self.db_reader.get().unwrap();
+            let result: Result<Vec<RalQueryResult>, Error> = sql_query(
             r#"
                 SELECT
                 CASE WHEN Count(1) = 0 THEN 0 ELSE Sum(s1.amount_cents) :: FLOAT / Count(1) END AS ral
@@ -710,35 +780,64 @@ impl BeanCounter {
         )
         .bind::<diesel::pg::types::sql_types::Uuid, _>(client_uuid_to)
         .get_results(&conn);
-        let ral = match result {
-            Ok(result) => {
-                if result.len() > 0 {
-                    // convert from cents to dollars
-                    let ral = result[0].ral / 100.0;
-                    RAL_HISTO.observe(ral);
-                    // round to nearest dollar
-                    ral.round() as i32
-                } else {
+            let ral = match result {
+                Ok(result) => {
+                    if result.len() > 0 {
+                        // convert from cents to dollars
+                        let ral = result[0].ral / 100.0;
+                        RAL_HISTO.observe(ral);
+                        // round to nearest dollar
+                        ral.round() as i32
+                    } else {
+                        -1
+                    }
+                }
+                Err(err) => {
+                    error!("couldn't update RAL: {:?}", err);
                     -1
                 }
-            }
-            Err(err) => {
-                error!("couldn't update RAL: {:?}", err);
-                -1
-            }
-        };
+            };
 
-        PAYMENT_SETTLED.inc_by(i64::from(payment_amount_after_fee));
-        PAYMENT_SETTLED_HISTO.observe(f64::from(payment_amount_after_fee) / 100.0);
-        PAYMENT_SETTLED_FEE.inc_by(i64::from(payment_amount_after_fee));
-        PAYMENT_SETTLED_FEE_HISTO.observe(f64::from(fee_amount) / 100.0);
+            PAYMENT_SETTLED.inc_by(i64::from(payment_amount_after_fee));
+            PAYMENT_SETTLED_HISTO.observe(f64::from(payment_amount_after_fee) / 100.0);
+            PAYMENT_SETTLED_FEE.inc_by(i64::from(payment_amount_after_fee));
+            PAYMENT_SETTLED_FEE_HISTO.observe(f64::from(fee_amount) / 100.0);
 
-        Ok(SettlePaymentResponse {
-            fee_cents: fee_amount,
-            payment_cents: payment_amount_after_fee,
-            balance: Some(balance.into()),
-            ral: ral,
-        })
+            Ok(SettlePaymentResponse {
+                fee_cents: fee_amount,
+                payment_cents: payment_amount_after_fee,
+                balance: Some(balance.into()),
+                ral: ral,
+            })
+        } else {
+            // this is a promo payment
+            let (payment_amount, balance) = conn.transaction::<(i32, Balance), Error, _>(|| {
+                // Add TX from umpyre cash account to recipient
+                add_promo_transaction(
+                    Some(payment.client_id_to),
+                    None,
+                    payment.payment_cents,
+                    TransactionReason::MessageRead,
+                    &conn,
+                )?;
+
+                // delete the payment
+                diesel::delete(payments)
+                    .filter(message_hash.eq(BASE64URL_NOPAD.encode(&request.message_hash)))
+                    .execute(&conn)?;
+
+                let balance = update_and_return_balance(payment.client_id_to, &conn)?;
+
+                Ok((payment.payment_cents, balance))
+            })?;
+
+            Ok(SettlePaymentResponse {
+                fee_cents: 0,
+                payment_cents: payment_amount,
+                balance: Some(balance.into()),
+                ral: -1,
+            })
+        }
     }
 
     #[instrument(INFO)]

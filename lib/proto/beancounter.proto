@@ -126,6 +126,7 @@ message AddPaymentRequest {
   string client_id_to = 2;
   bytes message_hash = 3;
   int32 payment_cents = 4;
+  bool is_promo = 5;
 }
 message AddPaymentResponse {
   enum Result {
@@ -166,6 +167,7 @@ message Transaction {
     DEBIT = 0;
     CREDIT = 1;
     PROMO_CREDIT = 2;
+    PROMO_DEBIT = 3;
   }
   enum Reason {
     MESSAGE_READ = 0;

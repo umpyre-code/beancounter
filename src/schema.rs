@@ -25,6 +25,7 @@ table! {
         client_id_to -> Uuid,
         payment_cents -> Int4,
         message_hash -> Text,
+        is_promo -> Bool,
     }
 }
 

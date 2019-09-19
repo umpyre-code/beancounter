@@ -8,6 +8,8 @@ pub enum TransactionType {
     Credit,
     #[db_rename = "promo_credit"]
     PromoCredit,
+    #[db_rename = "promo_debit"]
+    PromoDebit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, DbEnum)]
