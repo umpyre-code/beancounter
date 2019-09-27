@@ -566,6 +566,36 @@ impl BeanCounter {
     }
 
     #[instrument(INFO)]
+    fn handle_add_promo(
+        &self,
+        request: &AddPromoRequest,
+    ) -> Result<AddPromoResponse, RequestError> {
+        use crate::models::*;
+        use crate::sql_types::TransactionReason;
+        use diesel::prelude::*;
+        use diesel::result::Error;
+        use uuid::Uuid;
+
+        let client_uuid = Uuid::parse_str(&request.client_id)?;
+
+        let conn = self.db_writer.get().unwrap();
+        let balance = conn.transaction::<Balance, Error, _>(|| {
+            add_promo_transaction(
+                Some(client_uuid),
+                None,
+                request.amount_cents,
+                TransactionReason::CreditAdded,
+                &conn,
+            )?;
+            Ok(update_and_return_balance(client_uuid, &conn)?)
+        })?;
+
+        Ok(AddPromoResponse {
+            balance: Some(balance.into()),
+        })
+    }
+
+    #[instrument(INFO)]
     fn handle_add_payment(
         &self,
         request: &AddPaymentRequest,
@@ -1123,6 +1153,7 @@ impl proto::server::BeanCounter for BeanCounter {
     type GetBalanceFuture = FutureResult<Response<GetBalanceResponse>, Status>;
     type GetTransactionsFuture = FutureResult<Response<GetTransactionsResponse>, Status>;
     type AddCreditsFuture = FutureResult<Response<AddCreditsResponse>, Status>;
+    type AddPromoFuture = FutureResult<Response<AddPromoResponse>, Status>;
     type ConnectPayoutFuture = FutureResult<Response<ConnectPayoutResponse>, Status>;
     type AddPaymentFuture = FutureResult<Response<AddPaymentResponse>, Status>;
     type SettlePaymentFuture = FutureResult<Response<SettlePaymentResponse>, Status>;
@@ -1158,6 +1189,15 @@ impl proto::server::BeanCounter for BeanCounter {
     fn add_credits(&mut self, request: Request<AddCreditsRequest>) -> Self::AddCreditsFuture {
         use futures::future::IntoFuture;
         self.handle_add_credits(request.get_ref())
+            .map(Response::new)
+            .map_err(|err| Status::new(Code::InvalidArgument, err.to_string()))
+            .into_future()
+    }
+
+    /// Add promo credits
+    fn add_promo(&mut self, request: Request<AddPromoRequest>) -> Self::AddPromoFuture {
+        use futures::future::IntoFuture;
+        self.handle_add_promo(request.get_ref())
             .map(Response::new)
             .map_err(|err| Status::new(Code::InvalidArgument, err.to_string()))
             .into_future()
