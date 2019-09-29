@@ -520,9 +520,17 @@ impl BeanCounter {
         let conn = self.db_reader.get().unwrap();
         let tx_vec =
             conn.transaction::<Vec<beancounter_grpc::proto::Transaction>, Error, _>(|| {
-                let result = transactions
-                    .filter(client_id.eq(client_uuid))
-                    .get_results(&conn)?;
+                let result = if request.limit > 0 {
+                    transactions
+                        .filter(client_id.eq(client_uuid))
+                        .limit(request.limit)
+                        .order(created_at.desc())
+                        .get_results(&conn)?
+                } else {
+                    transactions
+                        .filter(client_id.eq(client_uuid))
+                        .get_results(&conn)?
+                };
 
                 Ok(result
                     .iter()
