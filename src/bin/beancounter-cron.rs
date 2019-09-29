@@ -45,7 +45,7 @@ pub struct ClientPayout {
 fn do_cleanup() -> Result<(), Error> {
     use beancounter::models::Payment;
     use beancounter::schema::payments::dsl::*;
-    use beancounter::service::add_transaction;
+    use beancounter::service::{add_promo_transaction, add_transaction};
     use beancounter::sql_types::TransactionReason;
     use chrono::{Duration, Utc};
     use diesel::connection::Connection;
@@ -65,13 +65,28 @@ fn do_cleanup() -> Result<(), Error> {
 
         for payment in expired_payments.iter() {
             // This payment was never settled. Refund (credit) the fee to the sender.
-            add_transaction(
-                Some(payment.client_id_from),
-                None,
-                payment.payment_cents,
-                TransactionReason::MessageUnread,
-                &conn,
-            )?;
+            // But first, check if it was a promo.
+            if payment.client_id_from.to_simple().to_string()
+                == config::CONFIG.system_account.client_id
+            {
+                // This was a promo because it came from the system account
+                add_promo_transaction(
+                    Some(payment.client_id_from),
+                    None,
+                    payment.payment_cents,
+                    TransactionReason::MessageUnread,
+                    &conn,
+                )?;
+            } else {
+                // Not a promo
+                add_transaction(
+                    Some(payment.client_id_from),
+                    None,
+                    payment.payment_cents,
+                    TransactionReason::MessageUnread,
+                    &conn,
+                )?;
+            }
 
             // Delete the payment record from the DB
             diesel::delete(payments)

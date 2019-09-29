@@ -11,6 +11,13 @@ pub struct Config {
     pub database: Databases,
     pub metrics: Metrics,
     pub stripe: Stripe,
+    pub system_account: Account,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Account {
+    pub client_id: String,
+    pub welcome_promo_amount: i32,
 }
 
 #[derive(Debug, Deserialize)]
