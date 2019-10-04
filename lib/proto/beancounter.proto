@@ -40,6 +40,9 @@ service BeanCounter {
   rpc UpdateConnectAccountPrefs(UpdateConnectAccountPrefsRequest)
       returns (UpdateConnectAccountPrefsResponse);
 
+  // Get TX stats
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+
   // Health check endpoint
   rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
 }
@@ -219,6 +222,18 @@ message StripeChargeResponse {
   string api_response = 2;
   string message = 3;
   Balance balance = 4;
+}
+
+message AmountByDate {
+  int64 amount_cents = 1;
+  int32 year = 2;
+  int32 month = 3;
+  int32 day = 4;
+}
+message GetStatsRequest {}
+message GetStatsResponse {
+  repeated AmountByDate message_read_amount = 1;
+  repeated AmountByDate message_sent_amount = 2;
 }
 
 message HealthCheckRequest { string service = 1; }

@@ -339,6 +339,14 @@ pub struct RalQueryResult {
     pub ral: f64,
 }
 
+#[derive(Debug, QueryableByName)]
+pub struct StatsQueryResult {
+    #[sql_type = "diesel::sql_types::BigInt"]
+    pub amount_cents: i64,
+    #[sql_type = "diesel::sql_types::Date"]
+    pub ds: chrono::NaiveDate,
+}
+
 #[instrument(INFO)]
 pub fn add_transaction(
     client_id_credit: Option<uuid::Uuid>,
@@ -1155,6 +1163,85 @@ impl BeanCounter {
             _ => Err(RequestError::BadArguments),
         }
     }
+
+    #[instrument(INFO)]
+    fn handle_get_stats(
+        &self,
+        _request: &GetStatsRequest,
+    ) -> Result<GetStatsResponse, RequestError> {
+        use chrono::Datelike;
+        use diesel::prelude::*;
+        use diesel::result::Error;
+        use diesel::sql_query;
+
+        let conn = self.db_reader.get().unwrap();
+        let result: Result<Vec<StatsQueryResult>, Error> = sql_query(
+            r#"
+                SELECT Sum(amount_cents) AS amount_cents,
+                    DATE(created_at)  AS ds
+                FROM   transactions
+                WHERE  tx_type = 'credit'
+                    AND tx_reason = 'message_read'
+                    AND created_at >= current_date - interval '30' day
+                GROUP  BY ds
+                ORDER  BY ds
+           "#,
+        )
+        .get_results(&conn);
+
+        let message_read_amount = match result {
+            Ok(result) => result
+                .iter()
+                .map(|result| AmountByDate {
+                    amount_cents: result.amount_cents,
+                    year: result.ds.year(),
+                    month: result.ds.month() as i32,
+                    day: result.ds.day() as i32,
+                })
+                .collect(),
+            Err(err) => {
+                error!("Error reading stats: {:?}", err);
+                vec![]
+            }
+        };
+
+        let conn = self.db_reader.get().unwrap();
+        let result: Result<Vec<StatsQueryResult>, Error> = sql_query(
+            r#"
+                SELECT Sum(amount_cents) AS amount_cents,
+                    DATE(created_at)  AS ds
+                FROM   transactions
+                WHERE  tx_type = 'debit'
+                    AND client_id IS NOT NULL
+                    AND tx_reason = 'message_sent'
+                    AND created_at >= current_date - interval '30' day
+                GROUP  BY ds
+                ORDER  BY ds
+           "#,
+        )
+        .get_results(&conn);
+
+        let message_sent_amount = match result {
+            Ok(result) => result
+                .iter()
+                .map(|result| AmountByDate {
+                    amount_cents: result.amount_cents,
+                    year: result.ds.year(),
+                    month: result.ds.month() as i32,
+                    day: result.ds.day() as i32,
+                })
+                .collect(),
+            Err(err) => {
+                error!("Error reading stats: {:?}", err);
+                vec![]
+            }
+        };
+
+        Ok(GetStatsResponse {
+            message_read_amount,
+            message_sent_amount,
+        })
+    }
 }
 
 impl proto::server::BeanCounter for BeanCounter {
@@ -1170,6 +1257,7 @@ impl proto::server::BeanCounter for BeanCounter {
     type GetConnectAccountFuture = FutureResult<Response<GetConnectAccountResponse>, Status>;
     type UpdateConnectAccountPrefsFuture =
         FutureResult<Response<UpdateConnectAccountPrefsResponse>, Status>;
+    type GetStatsFuture = FutureResult<Response<GetStatsResponse>, Status>;
     type CheckFuture = FutureResult<Response<HealthCheckResponse>, Status>;
 
     /// Get account balance
@@ -1284,6 +1372,15 @@ impl proto::server::BeanCounter for BeanCounter {
     ) -> Self::UpdateConnectAccountPrefsFuture {
         use futures::future::IntoFuture;
         self.handle_update_connect_account_prefs(request.get_ref())
+            .map(Response::new)
+            .map_err(|err| Status::new(Code::InvalidArgument, err.to_string()))
+            .into_future()
+    }
+
+    /// Get TX stats
+    fn get_stats(&mut self, request: Request<GetStatsRequest>) -> Self::GetStatsFuture {
+        use futures::future::IntoFuture;
+        self.handle_get_stats(request.get_ref())
             .map(Response::new)
             .map_err(|err| Status::new(Code::InvalidArgument, err.to_string()))
             .into_future()
