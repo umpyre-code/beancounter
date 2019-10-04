@@ -1182,7 +1182,8 @@ impl BeanCounter {
                 FROM   transactions
                 WHERE  tx_type = 'credit'
                     AND tx_reason = 'message_read'
-                    AND created_at >= current_date - interval '30' day
+                    AND DATE(created_at) >= current_date - interval '31' day
+                    AND DATE(created_at) < DATE(current_date)
                 GROUP  BY ds
                 ORDER  BY ds
            "#,
@@ -1214,7 +1215,8 @@ impl BeanCounter {
                 WHERE  tx_type = 'debit'
                     AND client_id IS NOT NULL
                     AND tx_reason = 'message_sent'
-                    AND created_at >= current_date - interval '30' day
+                    AND DATE(created_at) >= current_date - interval '31' day
+                    AND DATE(created_at) < DATE(current_date)
                 GROUP  BY ds
                 ORDER  BY ds
            "#,
