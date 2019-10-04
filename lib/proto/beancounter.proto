@@ -230,10 +230,16 @@ message AmountByDate {
   int32 month = 3;
   int32 day = 4;
 }
+message AmountByClient {
+  int64 amount_cents = 1;
+  string client_id = 2;
+}
 message GetStatsRequest {}
 message GetStatsResponse {
   repeated AmountByDate message_read_amount = 1;
   repeated AmountByDate message_sent_amount = 2;
+  repeated AmountByClient most_well_read = 3;
+  repeated AmountByClient most_generous = 4;
 }
 
 message HealthCheckRequest { string service = 1; }

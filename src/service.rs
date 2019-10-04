@@ -340,11 +340,19 @@ pub struct RalQueryResult {
 }
 
 #[derive(Debug, QueryableByName)]
-pub struct StatsQueryResult {
+pub struct AmountByDateQueryResult {
     #[sql_type = "diesel::sql_types::BigInt"]
     pub amount_cents: i64,
     #[sql_type = "diesel::sql_types::Date"]
     pub ds: chrono::NaiveDate,
+}
+
+#[derive(Debug, QueryableByName)]
+pub struct AmountByClientQueryResult {
+    #[sql_type = "diesel::sql_types::BigInt"]
+    pub amount_cents: i64,
+    #[sql_type = "diesel::sql_types::Uuid"]
+    pub client_id: uuid::Uuid,
 }
 
 #[instrument(INFO)]
@@ -1175,7 +1183,7 @@ impl BeanCounter {
         use diesel::sql_query;
 
         let conn = self.db_reader.get().unwrap();
-        let result: Result<Vec<StatsQueryResult>, Error> = sql_query(
+        let result: Result<Vec<AmountByDateQueryResult>, Error> = sql_query(
             r#"
                 SELECT Sum(amount_cents) AS amount_cents,
                     DATE(created_at)  AS ds
@@ -1206,8 +1214,7 @@ impl BeanCounter {
             }
         };
 
-        let conn = self.db_reader.get().unwrap();
-        let result: Result<Vec<StatsQueryResult>, Error> = sql_query(
+        let result: Result<Vec<AmountByDateQueryResult>, Error> = sql_query(
             r#"
                 SELECT Sum(amount_cents) AS amount_cents,
                     DATE(created_at)  AS ds
@@ -1239,9 +1246,71 @@ impl BeanCounter {
             }
         };
 
+        let result: Result<Vec<AmountByClientQueryResult>, Error> = sql_query(
+            r#"
+                SELECT Sum(amount_cents) AS amount_cents,
+                       client_id
+                FROM   transactions
+                WHERE  tx_type = 'credit'
+                    AND client_id IS NOT NULL
+                    AND tx_reason = 'message_read'
+                    AND DATE(created_at) >= current_date - interval '31' day
+                GROUP  BY client_id
+                ORDER  BY amount_cents DESC
+                LIMIT 10
+           "#,
+        )
+        .get_results(&conn);
+
+        let most_well_read = match result {
+            Ok(result) => result
+                .iter()
+                .map(|result| AmountByClient {
+                    amount_cents: result.amount_cents,
+                    client_id: result.client_id.to_simple().to_string(),
+                })
+                .collect(),
+            Err(err) => {
+                error!("Error reading stats: {:?}", err);
+                vec![]
+            }
+        };
+
+        let result: Result<Vec<AmountByClientQueryResult>, Error> = sql_query(
+            r#"
+                SELECT Sum(amount_cents) AS amount_cents,
+                       client_id
+                FROM   transactions
+                WHERE  tx_type = 'debit'
+                    AND client_id IS NOT NULL
+                    AND tx_reason = 'message_sent'
+                    AND DATE(created_at) >= current_date - interval '31' day
+                GROUP  BY client_id
+                ORDER  BY amount_cents
+                LIMIT 10
+           "#,
+        )
+        .get_results(&conn);
+
+        let most_generous = match result {
+            Ok(result) => result
+                .iter()
+                .map(|result| AmountByClient {
+                    amount_cents: result.amount_cents,
+                    client_id: result.client_id.to_simple().to_string(),
+                })
+                .collect(),
+            Err(err) => {
+                error!("Error reading stats: {:?}", err);
+                vec![]
+            }
+        };
+
         Ok(GetStatsResponse {
             message_read_amount,
             message_sent_amount,
+            most_well_read,
+            most_generous,
         })
     }
 }
