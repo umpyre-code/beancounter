@@ -348,6 +348,14 @@ pub struct AmountByDateQueryResult {
 }
 
 #[derive(Debug, QueryableByName)]
+pub struct CountByDateQueryResult {
+    #[sql_type = "diesel::sql_types::BigInt"]
+    pub count: i64,
+    #[sql_type = "diesel::sql_types::Date"]
+    pub ds: chrono::NaiveDate,
+}
+
+#[derive(Debug, QueryableByName)]
 pub struct AmountByClientQueryResult {
     #[sql_type = "diesel::sql_types::BigInt"]
     pub amount_cents: i64,
@@ -1306,11 +1314,44 @@ impl BeanCounter {
             }
         };
 
+        let result: Result<Vec<CountByDateQueryResult>, Error> = sql_query(
+            r#"
+                SELECT Count(1) AS count,
+                    dq.date  AS ds
+                FROM   (SELECT ( CURRENT_DATE - offs ) AS date
+                        FROM   Generate_series(1, 31, 1) AS offs) AS dq
+                    LEFT OUTER JOIN transactions tx
+                                    ON Date(tx.created_at) <= dq.date
+                WHERE   tx.tx_type = 'credit'
+                    AND tx.tx_reason = 'message_read'
+                GROUP  BY dq.date
+                ORDER  BY dq.date
+           "#,
+        )
+        .get_results(&conn);
+
+        let read_by_date = match result {
+            Ok(result) => result
+                .iter()
+                .map(|result| CountByDate {
+                    count: result.count,
+                    year: result.ds.year(),
+                    month: result.ds.month() as i32,
+                    day: result.ds.day() as i32,
+                })
+                .collect(),
+            Err(err) => {
+                error!("Error reading stats: {:?}", err);
+                vec![]
+            }
+        };
+
         Ok(GetStatsResponse {
             message_read_amount,
             message_sent_amount,
             most_well_read,
             most_generous,
+            read_by_date,
         })
     }
 }
