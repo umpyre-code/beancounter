@@ -831,7 +831,7 @@ impl BeanCounter {
             let result: Result<Vec<RalQueryResult>, Error> = sql_query(
             r#"
                 SELECT
-                CASE WHEN Count(1) = 0 THEN 0 ELSE Sum(s1.amount_cents) :: FLOAT / Count(1) END AS ral
+                CASE WHEN Count(1) = 0 THEN 0 ELSE Sum(s1.amount_cents * (1.0 / $1)) :: FLOAT / Count(1) END AS ral
                 FROM
                 (
                     SELECT
@@ -839,7 +839,7 @@ impl BeanCounter {
                     FROM
                         transactions AS t
                     WHERE
-                        t.client_id = $1
+                        t.client_id = $2
                         AND t.tx_type = 'credit'
                         AND t.tx_reason = 'message_read'
                     ORDER BY
@@ -849,6 +849,7 @@ impl BeanCounter {
                 ) AS s1
            "#,
         )
+        .bind::<diesel::sql_types::Double, _>(UMPYRE_MESSAGE_READ_FEE)
         .bind::<diesel::pg::types::sql_types::Uuid, _>(client_uuid_to)
         .get_results(&conn);
             let ral = match result {
