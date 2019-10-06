@@ -831,7 +831,7 @@ impl BeanCounter {
             let result: Result<Vec<RalQueryResult>, Error> = sql_query(
             r#"
                 SELECT
-                CASE WHEN Count(1) = 0 THEN 0 ELSE Sum(s1.amount_cents * (1.0 / $1)) :: FLOAT / Count(1) END AS ral
+                CASE WHEN Count(1) = 0 THEN 0 ELSE Sum(s1.amount_cents * (1.0 / (1 - $1))) :: FLOAT / Count(1) END AS ral
                 FROM
                 (
                     SELECT
