@@ -258,6 +258,17 @@ fn update_and_return_balance(
         .first::<Option<i64>>(conn)?
         .unwrap_or_else(|| 0);
 
+    let credits_added_sum = transactions
+        .filter(
+            tx_type
+                .eq(TransactionType::Credit)
+                .and(client_id.eq(client_uuid))
+                .and(tx_reason.eq(TransactionReason::CreditAdded)),
+        )
+        .select(sum(amount_cents))
+        .first::<Option<i64>>(conn)?
+        .unwrap_or_else(|| 0);
+
     let promo_credit_sum = transactions
         .filter(
             tx_type
@@ -314,8 +325,7 @@ fn update_and_return_balance(
         .unwrap_or_else(|| 0);
 
     let withdrawable_cents_remaining =
-        std::cmp::min(balance_cents_remaining, payments_sum - withdrawn_sum);
-
+        std::cmp::min(balance_cents_remaining, payments_sum + withdrawn_sum);
     Ok(insert_into(balances)
         .values(&NewBalance {
             client_id: client_uuid,
@@ -1707,8 +1717,8 @@ mod tests {
         assert!(result.is_ok());
         let balance = result.unwrap().balance.unwrap();
         assert_eq!(balance.balance_cents, i64::from(balance_amount));
-        assert_eq!(balance.withdrawable_cents, 0);
         assert_eq!(balance.promo_cents, 0);
+        assert_eq!(balance.withdrawable_cents, 0);
 
         let balance_result = beancounter.handle_get_balance(&GetBalanceRequest {
             client_id: client_uuid_from.clone(),
@@ -1744,9 +1754,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             sender_balance.balance_cents,
-            i64::from(balance_amount - payment_amount) + i64::from(payment_amount - (payment_cents + fee_cents))
+            i64::from(balance_amount - payment_amount)
+                + i64::from(payment_amount - (payment_cents + fee_cents))
         );
         assert_eq!(sender_balance.promo_cents, 0);
+        assert_eq!(sender_balance.withdrawable_cents, 0);
 
         // Check balance of recipient--should be zero
         let recipient_balance = beancounter
@@ -1785,6 +1797,168 @@ mod tests {
         });
 
         assert!(result.is_err());
+
+        // Add some more credits to sender, check the balance
+        let balance_amount = 500;
+        let result = beancounter.handle_add_credits(&AddCreditsRequest {
+            client_id: client_uuid_from.clone(),
+            amount_cents: balance_amount,
+        });
+
+        assert!(result.is_ok());
+        let balance = result.unwrap().balance.unwrap();
+        assert_eq!(balance.balance_cents, 901);
+        assert_eq!(balance.withdrawable_cents, 0);
+        assert_eq!(balance.promo_cents, 0);
+
+        let balance_result = beancounter.handle_get_balance(&GetBalanceRequest {
+            client_id: client_uuid_from.clone(),
+        });
+
+        assert!(balance_result.is_ok());
+        let balance = balance_result.unwrap().balance.unwrap();
+        assert_eq!(balance.balance_cents, 901);
+        assert_eq!(balance.promo_cents, 0);
+        assert_eq!(balance.withdrawable_cents, 0);
+
+        // Add payment from recipient to sender
+        let payment_amount = 90;
+        let payment_cents =
+            (f64::from(payment_amount) / (1.0 + UMPYRE_MESSAGE_SEND_FEE)).round() as i32;
+        let fee_cents = (f64::from(payment_cents) * UMPYRE_MESSAGE_SEND_FEE).floor() as i32;
+        // generate a new hash
+        rand::thread_rng().fill_bytes(&mut message_hash);
+        let result = beancounter.handle_add_payment(&AddPaymentRequest {
+            client_id_from: client_uuid_to.clone(),
+            client_id_to: client_uuid_from.clone(),
+            message_hash: message_hash.clone(),
+            payment_cents,
+            is_promo: false,
+        });
+
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result.result, add_payment_response::Result::Success as i32);
+        assert_eq!(result.payment_cents, payment_cents);
+        assert_eq!(result.fee_cents, fee_cents);
+
+        // Check balance of sender
+        let sender_balance = beancounter
+            .get_balance(Uuid::parse_str(&client_uuid_to).unwrap())
+            .unwrap();
+        assert_eq!(sender_balance.balance_cents, 2);
+        assert_eq!(sender_balance.promo_cents, 0);
+        assert_eq!(sender_balance.withdrawable_cents, 2);
+
+        // Check balance of recipient--shouldn't have changed
+        let recipient_balance = beancounter
+            .get_balance(Uuid::parse_str(&client_uuid_from).unwrap())
+            .unwrap();
+        assert_eq!(recipient_balance.balance_cents, 901);
+        assert_eq!(recipient_balance.promo_cents, 0);
+        assert_eq!(recipient_balance.withdrawable_cents, 0);
+
+        // Try and settle the payment
+        let result = beancounter.handle_settle_payment(&SettlePaymentRequest {
+            client_id: client_uuid_from.clone(),
+            message_hash: message_hash.clone(),
+        });
+
+        assert!(result.is_ok());
+
+        // Check balance of recipient--should equal to the payment minus fee
+        let recipient_balance = beancounter
+            .get_balance(Uuid::parse_str(&client_uuid_from).unwrap())
+            .unwrap();
+        assert_eq!(recipient_balance.balance_cents, 982);
+        assert_eq!(recipient_balance.promo_cents, 0);
+        assert_eq!(recipient_balance.withdrawable_cents, 81);
+
+        // Add some more credits to sender, check the balance
+        let balance_amount = 500;
+        let result = beancounter.handle_add_credits(&AddCreditsRequest {
+            client_id: client_uuid_from.clone(),
+            amount_cents: balance_amount,
+        });
+
+        assert!(result.is_ok());
+        let balance = result.unwrap().balance.unwrap();
+        assert_eq!(balance.balance_cents, 1482);
+        assert_eq!(balance.promo_cents, 0);
+        assert_eq!(balance.withdrawable_cents, 81);
+
+        // Create another payment
+        let payment_amount = 1482;
+        let payment_cents =
+            (f64::from(payment_amount) / (1.0 + UMPYRE_MESSAGE_SEND_FEE)).round() as i32;
+        let fee_cents = (f64::from(payment_cents) * UMPYRE_MESSAGE_SEND_FEE).floor() as i32;
+        // generate a new hash
+        rand::thread_rng().fill_bytes(&mut message_hash);
+        let result = beancounter.handle_add_payment(&AddPaymentRequest {
+            client_id_from: client_uuid_from.clone(),
+            client_id_to: client_uuid_to.clone(),
+            message_hash: message_hash.clone(),
+            payment_cents,
+            is_promo: false,
+        });
+
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result.result, add_payment_response::Result::Success as i32);
+        assert_eq!(result.payment_cents, payment_cents);
+        assert_eq!(result.fee_cents, fee_cents);
+
+        // Check balance of sender
+        let sender_balance = beancounter
+            .get_balance(Uuid::parse_str(&client_uuid_from).unwrap())
+            .unwrap();
+        assert_eq!(sender_balance.balance_cents, 0);
+        assert_eq!(sender_balance.promo_cents, 0);
+        assert_eq!(sender_balance.withdrawable_cents, 0);
+
+        // Check balance of recipient--should be unchanged
+        let recipient_balance = beancounter
+            .get_balance(Uuid::parse_str(&client_uuid_to).unwrap())
+            .unwrap();
+        assert_eq!(recipient_balance.balance_cents, 2);
+        assert_eq!(recipient_balance.promo_cents, 0);
+        assert_eq!(recipient_balance.withdrawable_cents, 2);
+
+        // Try and settle the payment
+        let result = beancounter.handle_settle_payment(&SettlePaymentRequest {
+            client_id: client_uuid_to.clone(),
+            message_hash: message_hash.clone(),
+        });
+
+        assert!(result.is_ok());
+        let result = result.unwrap();
+
+        // Check balance of recipient--should equal to the payment minus fee
+        let recipient_balance = beancounter
+            .get_balance(Uuid::parse_str(&client_uuid_to).unwrap())
+            .unwrap();
+        assert_eq!(
+            recipient_balance.balance_cents,
+            i64::from(result.payment_cents) + 2 // 2 is leftover from before
+        );
+        assert_eq!(recipient_balance.promo_cents, 0);
+        assert_eq!(
+            recipient_balance.withdrawable_cents,
+            i64::from(result.payment_cents) + 2 // 2 is leftover from before
+        );
+
+        // Add some more credits to sender, check the balance again
+        let balance_amount = 500;
+        let result = beancounter.handle_add_credits(&AddCreditsRequest {
+            client_id: client_uuid_from.clone(),
+            amount_cents: balance_amount,
+        });
+
+        assert!(result.is_ok());
+        let balance = result.unwrap().balance.unwrap();
+        assert_eq!(balance.balance_cents, 500);
+        assert_eq!(balance.promo_cents, 0);
+        assert_eq!(balance.withdrawable_cents, 81);
 
         check_zero_sum(&db_pool_reader);
     }
