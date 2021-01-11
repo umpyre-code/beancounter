@@ -36,7 +36,7 @@ tower-request-modifier = "0.1"
 tower-service = "0.2"
 tower-util = "0.1"
 url = "2"
-uuid = { version = "0.7", features = ["serde", "v4"] }
+uuid = { version = "0.8", features = ["serde", "v4"] }
 yansi = "0.5"
 
 [dev-dependencies]
