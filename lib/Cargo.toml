@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 bytes = "0.4"
 chrono = "0.4"
-prost = "0.5"
+prost = "0.8"
 tower-grpc = "0.1"
 tower-hyper = "0.1"
 
